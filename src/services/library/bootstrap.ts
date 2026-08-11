@@ -268,9 +268,31 @@ export async function ensureNodeNote(nodeId: string): Promise<string | null> {
   }
 
   const note = await notesRepo.create({
-    bookId: node.bookId ?? null,
+    // The *effective* book, not the node's own. A chapter carries no `bookId`
+    // of its own — only its parent book does — so resolving it here is what
+    // makes chapter notes belong to their book and show up alongside it.
+    // A notes-only item with no book above it keeps `null`, which is correct.
+    bookId: await resolveBookId(node),
     title: node.arabicTitle ? `${node.title} — ${node.arabicTitle}` : node.title,
   })
   await libraryRepo.update(nodeId, { noteId: note.id })
   return note.id
+}
+
+/**
+ * The nearest book at or above a node.
+ *
+ * Shared so that "which PDF does this chapter show?" and "which book do this
+ * chapter's notes belong to?" can never answer differently.
+ */
+export async function resolveBookId(node: LibraryNode): Promise<string | null> {
+  if (node.bookId) return node.bookId
+  let current: LibraryNode | undefined = node
+  const seen = new Set<string>([node.id])
+  while (current?.parentId && !seen.has(current.parentId)) {
+    seen.add(current.parentId)
+    current = await libraryRepo.get(current.parentId)
+    if (current?.bookId) return current.bookId
+  }
+  return null
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@/features/shell/AppShell'
 import { bootstrapLibrary } from '@/services/library/bootstrap'
+import { useLibraryStore } from '@/state/useLibraryStore'
 import { useAppStore } from '@/state/useAppStore'
 
 export function App() {
@@ -16,6 +17,7 @@ export function App() {
         // here leaves the tree incomplete rather than the database broken, and
         // the next start finishes the job.
         await bootstrapLibrary()
+        await useLibraryStore.getState().hydrate()
       } catch (error) {
         setFatal(
           error instanceof Error

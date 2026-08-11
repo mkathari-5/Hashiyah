@@ -1275,6 +1275,280 @@
   outline: 1px solid var(--color-accent);
 }
 
+/* ───────────────────────────────────────────────────────────────────────────
+   The library (Phase E)
+
+   Text-first and compact. A study library is navigated dozens of times a day,
+   so density and hierarchy matter far more than decoration — no cards, no
+   cover grid, no dashboard.
+   ─────────────────────────────────────────────────────────────────────────── */
+.library-home {
+  height: 100%;
+  overflow-y: auto;
+  background: var(--color-canvas);
+}
+.library-home-inner {
+  max-width: 54rem;
+  margin-inline: auto;
+  padding: 3rem 2rem 6rem;
+}
+
+.library-masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.75rem;
+  border-bottom: 1px solid var(--color-line);
+}
+.library-eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.library-title {
+  font-family: var(--font-arabic);
+  font-size: 2.4rem;
+  line-height: 1.25;
+  color: var(--color-ink);
+  margin-top: 0.15rem;
+}
+.library-import {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+}
+.library-import:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.library-section {
+  margin-bottom: 1.75rem;
+}
+.library-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  margin-bottom: 0.55rem;
+}
+
+.library-continue {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--color-line);
+  border-inline-start: 2px solid var(--color-accent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-panel) 55%, transparent);
+  text-align: start;
+}
+.library-continue:hover {
+  background: var(--color-hover);
+}
+.library-continue-title {
+  font-size: 14.5px;
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.library-continue-meta {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  margin-top: 0.15rem;
+}
+.library-continue-cta {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--color-accent);
+}
+
+.library-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.library-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.28rem 0.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  max-width: 22rem;
+}
+.library-chip:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+  border-color: var(--color-line-strong);
+}
+
+/* ── Tree rows ───────────────────────────────────────────────────────────── */
+.lib-tree ul {
+  margin: 0;
+}
+.lib-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  border-radius: 4px;
+  padding-inline-end: 0.25rem;
+  min-height: 1.65rem;
+}
+.lib-tree-home .lib-row {
+  min-height: 1.85rem;
+}
+.lib-row:hover {
+  background: var(--color-hover);
+}
+.lib-row.is-selected {
+  background: var(--color-accent-soft);
+}
+.lib-row.is-drop {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+
+.lib-caret {
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+  color: var(--color-ink-faint);
+  border-radius: 3px;
+}
+.lib-caret:hover {
+  background: var(--color-line);
+  color: var(--color-ink);
+}
+.lib-caret svg {
+  transition: transform 120ms ease;
+}
+
+.lib-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  padding-block: 0.15rem;
+  text-align: start;
+  color: var(--color-ink-muted);
+}
+.lib-row.is-selected .lib-label {
+  color: var(--color-ink);
+}
+.lib-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  color: var(--color-ink-faint);
+}
+.lib-star {
+  width: 0.7rem;
+  height: 0.7rem;
+  flex-shrink: 0;
+  color: var(--color-accent);
+  margin-inline-start: auto;
+}
+
+.lib-add {
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex-shrink: 0;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.lib-row:hover .lib-add {
+  opacity: 1;
+}
+.lib-add:hover {
+  background: var(--color-line);
+  color: var(--color-ink);
+}
+
+/* §E42 — science reads louder than book, book louder than chapter. */
+.lib-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12.5px;
+}
+.lib-title-latin {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lib-title-sep {
+  color: var(--color-ink-faint);
+  flex-shrink: 0;
+}
+.lib-title-arabic {
+  font-size: 1.15em;
+  flex-shrink: 0;
+}
+
+.lib-row-science > .lib-label .lib-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-ink);
+  letter-spacing: -0.005em;
+}
+.lib-row-book > .lib-label .lib-title,
+.lib-row-course > .lib-label .lib-title {
+  font-size: 12.5px;
+  font-weight: 550;
+}
+.lib-row-chapter > .lib-label .lib-title,
+.lib-row-lesson > .lib-label .lib-title,
+.lib-row-notes > .lib-label .lib-title {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.node-menu {
+  position: fixed;
+  z-index: 50;
+  width: 13rem;
+  padding: 0.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.12),
+    0 14px 36px rgb(0 0 0 / 0.16);
+}
+:root.dark .node-menu {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.45),
+    0 16px 40px rgb(0 0 0 / 0.5);
+}
+
 @layer utilities {
   .scrollbar-none {
     scrollbar-width: none;

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Group, Panel, Separator, type Layout } from 'react-resizable-panels'
 import { CommandPalette } from '@/features/command/CommandPalette'
 import { ImportDialog } from '@/features/library/ImportDialog'
-import { LibraryPanel } from '@/features/library/LibraryPanel'
+import { LibraryHome } from '@/features/library/LibraryHome'
+import { LibrarySidebar } from '@/features/library/LibrarySidebar'
 import { NotesPanel } from '@/features/notes/NotesPanel'
 import { PdfViewer } from '@/features/pdf/PdfViewer'
 import { SearchPanel } from '@/features/search/SearchPanel'
@@ -11,6 +12,7 @@ import { StatusBar } from '@/features/shell/StatusBar'
 import { TopBar } from '@/features/shell/TopBar'
 import { useShortcuts } from '@/features/shortcuts/useShortcuts'
 import { useAppStore } from '@/state/useAppStore'
+import { useLibraryStore } from '@/state/useLibraryStore'
 
 export function AppShell() {
   const layout = useAppStore((s) => s.layout)
@@ -18,6 +20,8 @@ export function AppShell() {
   const setSizes = useAppStore((s) => s.setSizes)
   const resetSizes = useAppStore((s) => s.resetSizes)
   const hydrated = useAppStore((s) => s.hydrated)
+  const activeNodeId = useLibraryStore((s) => s.activeNodeId)
+  const libraryHydrated = useLibraryStore((s) => s.hydrated)
 
   const [importOpen, setImportOpen] = useState(false)
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -74,8 +78,31 @@ export function AppShell() {
     }
   }, [])
 
-  if (!hydrated) {
+  if (!hydrated || !libraryHydrated) {
     return <div className="bg-canvas h-full" aria-busy="true" />
+  }
+
+  // §E1 — with nothing open, Ḥāshiyah is a library, not an empty reader.
+  if (activeNodeId === null) {
+    return (
+      <div className="bg-canvas flex h-full flex-col">
+        <TopBar onImport={openImport} />
+        <div className="min-h-0 flex-1">
+          <LibraryHome onImport={openImport} />
+        </div>
+        <StatusBar />
+        <CommandPalette onImport={openImport} />
+        <SearchPanel />
+        <ShortcutsDialog />
+        <ImportDialog
+          open={importOpen}
+          file={importFile}
+          onClose={() => setImportOpen(false)}
+          onPickFile={setImportFile}
+        />
+        {dragging && <DropVeil />}
+      </div>
+    )
   }
 
   const lesson = layout === 'lesson'
@@ -109,7 +136,7 @@ export function AppShell() {
                 maxSize="34%"
                 className="border-line bg-panel border-e"
               >
-                <LibraryPanel onImport={openImport} />
+                <LibrarySidebar onImport={openImport} />
               </Panel>
               <Handle />
             </>
@@ -150,11 +177,15 @@ export function AppShell() {
         onPickFile={setImportFile}
       />
 
-      {dragging && (
-        <div className="border-accent bg-canvas/80 pointer-events-none fixed inset-3 z-[80] grid place-items-center rounded-lg border-2 border-dashed">
-          <p className="text-accent text-sm font-medium">Drop a PDF to add it to your library</p>
-        </div>
-      )}
+      {dragging && <DropVeil />}
+    </div>
+  )
+}
+
+function DropVeil() {
+  return (
+    <div className="border-accent bg-canvas/80 pointer-events-none fixed inset-3 z-[80] grid place-items-center rounded-lg border-2 border-dashed">
+      <p className="text-accent text-sm font-medium">Drop a PDF to add it to your library</p>
     </div>
   )
 }

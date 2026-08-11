@@ -266,6 +266,57 @@ describe('ensureNodeNote', () => {
     expect(note?.title).toBe('Chapter 3 — باب الخوف من الشرك')
   })
 
+  /**
+   * A chapter carries no `bookId` of its own — only its parent book does. The
+   * first implementation took the node's own field, so every chapter note was
+   * created unattached and never appeared in the book's notes panel.
+   */
+  it("attaches a chapter's notes to the book above it, not to nothing", async () => {
+    await seedBook('bk_1', 'Kitāb at-Tawḥīd', null)
+    await bootstrapLibrary()
+
+    const bookNode = (await libraryRepo.all()).find((n) => n.bookId === 'bk_1')!
+    const chapter = await libraryRepo.create({
+      parentId: bookNode.id,
+      type: 'chapter',
+      title: 'Chapter 3',
+      arabicTitle: 'باب الخوف من الشرك',
+    })
+
+    const noteId = await ensureNodeNote(chapter.id)
+    const note = await db.notes.get(noteId!)
+    expect(note?.bookId).toBe('bk_1')
+
+    // And so it is listed among the book's notes.
+    const forBook = await db.notes.where('bookId').equals('bk_1').toArray()
+    expect(forBook.map((n) => n.id)).toContain(noteId)
+  })
+
+  it('leaves a notes-only item unattached, since it has no book', async () => {
+    await bootstrapLibrary()
+    const science = (await libraryRepo.children(null))[0]
+    const node = await libraryRepo.create({
+      parentId: science.id,
+      type: 'notes',
+      title: 'Questions to ask Ustādh',
+    })
+
+    const noteId = await ensureNodeNote(node.id)
+    expect((await db.notes.get(noteId!))?.bookId).toBeNull()
+  })
+
+  it('resolves through several levels of nesting', async () => {
+    await seedBook('bk_1', 'Kitāb at-Tawḥīd', null)
+    await bootstrapLibrary()
+    const bookNode = (await libraryRepo.all()).find((n) => n.bookId === 'bk_1')!
+
+    const part = await libraryRepo.create({ parentId: bookNode.id, type: 'folder', title: 'Part One' })
+    const chapter = await libraryRepo.create({ parentId: part.id, type: 'chapter', title: 'Chapter 3' })
+
+    const noteId = await ensureNodeNote(chapter.id)
+    expect((await db.notes.get(noteId!))?.bookId).toBe('bk_1')
+  })
+
   it('recovers if the linked note was deleted elsewhere', async () => {
     await bootstrapLibrary()
     const science = (await libraryRepo.children(null))[0]

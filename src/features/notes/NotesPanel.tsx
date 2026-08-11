@@ -36,10 +36,18 @@ export function NotesPanel() {
   const [words, setWords] = useState(0)
   const [savedLabel, setSavedLabel] = useState(false)
 
-  const notes = useLiveQuery(
-    () => (bookId ? notesRepo.forBook(bookId) : Promise.resolve<Note[]>([])),
-    [bookId],
-  )
+  /**
+   * The book's notes, plus the active one even when it belongs to no book.
+   * §E14 — "Questions to ask Ustādh" and a weekly timetable are notes-only
+   * library items; refusing to show them because no PDF is open would make
+   * whole sections of the library unreachable.
+   */
+  const notes = useLiveQuery(async () => {
+    const forBook = bookId ? await notesRepo.forBook(bookId) : []
+    if (!activeNoteId || forBook.some((n) => n.id === activeNoteId)) return forBook
+    const active = await notesRepo.get(activeNoteId)
+    return active ? [active, ...forBook] : forBook
+  }, [bookId, activeNoteId]) as Note[] | undefined
   const book = useLiveQuery(() => (bookId ? booksRepo.get(bookId) : undefined), [bookId])
   const subject = useLiveQuery(
     async () => (book?.subjectId ? (await subjectsRepo.all()).find((s) => s.id === book.subjectId) : undefined),
@@ -83,10 +91,11 @@ export function NotesPanel() {
 
   const onStats = useCallback((stats: { words: number }) => setWords(stats.words), [])
 
-  if (!bookId) {
+  // Only truly empty when there is neither a book nor a notes-only item open.
+  if (!bookId && !activeNoteId) {
     return (
       <div className="text-ink-faint grid h-full place-items-center px-6 text-center text-xs">
-        Notes appear here once a book is open.
+        Open something from the library to start writing.
       </div>
     )
   }
