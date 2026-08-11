@@ -1,0 +1,1285 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource/amiri/400.css';
+@import '@fontsource/amiri/700.css';
+/* pdf.js's own text-layer geometry. Hand-rolling this is a trap: v6 positions
+   spans with --total-scale-factor, --font-height, --scale-x and a min-font-size
+   inverse transform, and getting any of them wrong silently misplaces every
+   selection rectangle. We import theirs and override only appearance below. */
+@import 'pdfjs-dist/web/pdf_viewer.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Design tokens.
+
+   The palette is warm-neutral rather than blue-grey: paper and ink, not
+   dashboard. Nothing here is saturated except a single bronze accent, which is
+   the only colour allowed to draw the eye away from the book. Light mode is
+   warm off-white — a printed page, not a clinical white surface.
+   ─────────────────────────────────────────────────────────────────────────── */
+@theme {
+  --color-canvas: #faf8f3;
+  --color-panel: #f3efe7;
+  --color-elevated: #fffdf9;
+  --color-hover: #eae5da;
+  --color-line: #e3ddd0;
+  --color-line-strong: #cec5b3;
+  --color-ink: #211f1c;
+  --color-ink-muted: #6a6459;
+  --color-ink-faint: #9a9287;
+  --color-accent: #96682a;
+  --color-accent-soft: #f0e3cd;
+
+  --color-hl-amber: #d8a13d;
+  --color-hl-green: #56916a;
+  --color-hl-blue: #4a7fa8;
+  --color-hl-rose: #b8615f;
+  --color-hl-violet: #7f6aa8;
+  --color-hl-neutral: #8d867b;
+
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+  --font-arabic: 'Amiri', 'Traditional Arabic', 'Segoe UI', serif;
+
+  --radius-panel: 0.375rem;
+}
+
+:root.dark {
+  --color-canvas: #131211;
+  --color-panel: #1a1917;
+  --color-elevated: #201f1c;
+  --color-hover: #262421;
+  --color-line: #2b2926;
+  --color-line-strong: #3d3a35;
+  --color-ink: #ece7df;
+  --color-ink-muted: #9b9389;
+  --color-ink-faint: #6d665e;
+  --color-accent: #c99a4d;
+  --color-accent-soft: #3a2f1d;
+
+  --color-hl-amber: #c99a4d;
+  --color-hl-green: #6ba580;
+  --color-hl-blue: #5f9ac4;
+  --color-hl-rose: #cc7674;
+  --color-hl-violet: #9a83c4;
+  --color-hl-neutral: #8d867b;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  /* One focus treatment everywhere, always visible, never a fuzzy glow. */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  }
+
+  /* Arabic gets its own face and a larger optical size — Amiri runs small, and
+     tashkīl needs vertical room or the marks collide with the line above. */
+  [dir='rtl'],
+  .font-arabic {
+    font-family: var(--font-arabic);
+    font-size: 1.24em;
+    line-height: 2.05;
+    letter-spacing: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-faint);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Text layer — appearance only; geometry comes from pdf_viewer.css above.
+   The layer sits *over* the highlights so that dragging a selection across a
+   highlighted passage still selects text; highlight clicks are hit-tested
+   against the rects instead.
+   ─────────────────────────────────────────────────────────────────────────── */
+.textLayer {
+  z-index: 2;
+  caret-color: transparent;
+}
+
+.textLayer ::selection {
+  background: color-mix(in srgb, var(--color-accent) 38%, transparent);
+}
+
+.textLayer br::selection {
+  background: transparent;
+}
+
+/* §50 — a reading surface a shade deeper than the panels, so the white page
+   sits *on* something rather than dissolving into the chrome. */
+.pdf-canvas {
+  background:
+    radial-gradient(
+      ellipse 120% 60% at 50% 0%,
+      color-mix(in srgb, var(--color-ink) 4%, transparent),
+      transparent 70%
+    ),
+    var(--color-panel);
+}
+:root.dark .pdf-canvas {
+  background:
+    radial-gradient(ellipse 120% 60% at 50% 0%, rgb(0 0 0 / 0.25), transparent 70%),
+    #0e0d0c;
+}
+
+.pdf-page {
+  position: relative;
+  background: #fff;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 6px 18px rgb(0 0 0 / 0.09);
+  overflow: hidden;
+}
+
+:root.dark .pdf-page {
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.5),
+    0 8px 26px rgb(0 0 0 / 0.42);
+}
+
+.pdf-page > canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.highlight-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Highlights. Kept translucent and low-saturation by default — the §40 rule
+   that highlights must not be fluorescent.
+   ─────────────────────────────────────────────────────────────────────────── */
+.hl {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 1px;
+  mix-blend-mode: multiply;
+  transition: background-color 120ms ease;
+}
+
+:root.dark .hl {
+  mix-blend-mode: screen;
+}
+
+.hl-amber { background: color-mix(in srgb, var(--color-hl-amber) 34%, transparent); }
+.hl-green { background: color-mix(in srgb, var(--color-hl-green) 32%, transparent); }
+.hl-blue { background: color-mix(in srgb, var(--color-hl-blue) 32%, transparent); }
+.hl-rose { background: color-mix(in srgb, var(--color-hl-rose) 30%, transparent); }
+.hl-violet { background: color-mix(in srgb, var(--color-hl-violet) 30%, transparent); }
+.hl-neutral { background: color-mix(in srgb, var(--color-hl-neutral) 26%, transparent); }
+
+.hl:hover {
+  filter: brightness(1.12) saturate(1.2);
+}
+
+.hl-active {
+  outline: 1.5px solid var(--color-accent);
+  outline-offset: 0;
+}
+
+/* The ~1s pulse after jumping from a note back to its source (§70). */
+@keyframes source-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+    filter: none;
+  }
+  20%,
+  60% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 55%, transparent);
+    filter: brightness(1.3) saturate(1.4);
+  }
+}
+
+.hl-pulse {
+  animation: source-pulse 1.15s ease-in-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hl-pulse {
+    animation: none;
+    outline: 2px solid var(--color-accent);
+  }
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Notes editor (ProseMirror)
+
+   Target: a beautifully typeset academic notebook (§34). Generous vertical
+   rhythm, one clear heading hierarchy, restrained colour, and a measure that
+   stays readable however wide the panel gets.
+   ─────────────────────────────────────────────────────────────────────────── */
+.note-surface {
+  --note-measure: 46rem;
+}
+
+.ProseMirror {
+  outline: none;
+  min-height: 100%;
+  padding-bottom: 40vh; /* room to type at the bottom without scroll-fighting */
+  font-size: 14.5px;
+  color: var(--color-ink);
+}
+
+/* §36 — never let a line run the full width of a maximised panel. */
+.ProseMirror > * {
+  max-width: var(--note-measure);
+  margin-inline: auto;
+}
+
+.ProseMirror > * + * {
+  margin-top: 0.55em;
+}
+
+.ProseMirror p {
+  line-height: 1.7;
+}
+
+.ProseMirror h1,
+.ProseMirror h2,
+.ProseMirror h3 {
+  color: var(--color-ink);
+  scroll-margin-top: 1rem;
+}
+
+.ProseMirror h1 {
+  font-size: 1.5rem;
+  font-weight: 640;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  margin-top: 1.5em;
+}
+.ProseMirror h2 {
+  font-size: 1.2rem;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  margin-top: 1.4em;
+}
+.ProseMirror h3 {
+  font-size: 1.02rem;
+  font-weight: 640;
+  letter-spacing: -0.004em;
+  margin-top: 1.2em;
+}
+.ProseMirror h1[dir='rtl'],
+.ProseMirror h2[dir='rtl'],
+.ProseMirror h3[dir='rtl'] {
+  letter-spacing: 0;
+  line-height: 1.75;
+}
+
+/* §35 — lists that read as one connected thought, and work in both directions. */
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-inline-start: 1.5em;
+}
+.ProseMirror ul {
+  list-style: none;
+}
+.ProseMirror ol {
+  list-style: decimal;
+}
+.ProseMirror ol ol {
+  list-style: lower-alpha;
+}
+.ProseMirror ol ol ol {
+  list-style: lower-roman;
+}
+.ProseMirror li {
+  padding-inline-start: 0.15em;
+}
+.ProseMirror li + li {
+  margin-top: 0.28em;
+}
+.ProseMirror li::marker {
+  color: var(--color-ink-faint);
+  font-size: 0.92em;
+}
+.ProseMirror li > p {
+  margin: 0;
+}
+.ProseMirror li > ul,
+.ProseMirror li > ol {
+  margin-top: 0.28em;
+}
+
+/* Bullets drawn by hand so they sit correctly on the baseline in both scripts
+   — `list-style: disc` puts the dot in the wrong place for Arabic line heights. */
+.ProseMirror ul > li {
+  position: relative;
+}
+.ProseMirror ul > li::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: -0.95em;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-ink-faint);
+}
+.ProseMirror ul ul > li::before {
+  background: transparent;
+  border: 1px solid var(--color-ink-faint);
+}
+.ProseMirror ul ul ul > li::before {
+  border-radius: 0;
+  background: var(--color-ink-faint);
+  border: none;
+  width: 4px;
+  height: 4px;
+}
+.ProseMirror ul[data-type='taskList'] > li::before {
+  display: none;
+}
+/* Arabic list items need the marker further out and lower. */
+.ProseMirror li[dir='rtl']::before {
+  top: 0.85em;
+}
+
+.ProseMirror blockquote {
+  border-inline-start: 2px solid var(--color-line-strong);
+  padding-inline-start: 0.85em;
+  color: var(--color-ink-muted);
+}
+
+.ProseMirror code {
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 0.88em;
+  background: var(--color-hover);
+  padding: 0.1em 0.32em;
+  border-radius: 3px;
+}
+
+.ProseMirror pre {
+  background: var(--color-hover);
+  border-radius: 4px;
+  padding: 0.7em 0.85em;
+  overflow-x: auto;
+}
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+}
+
+.ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--color-line);
+  margin: 1.1em 0;
+}
+
+.ProseMirror mark {
+  background: color-mix(in srgb, var(--color-hl-amber) 35%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.ProseMirror a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-inline-start: 0.15em;
+}
+.ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  gap: 0.5em;
+  align-items: flex-start;
+}
+.ProseMirror ul[data-type='taskList'] li > label {
+  margin-top: 0.28em;
+}
+
+/* Placeholder on the currently focused empty block only — a page full of grey
+   prompts is noise. */
+.ProseMirror .is-empty.has-focus::before,
+.ProseMirror > .is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: inline-start;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-ink-faint);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Toggles (§25–§39).
+
+   The arrow sits in its own gutter column so the title aligns with ordinary
+   paragraphs, and collapsing hides the *content element* — which contains every
+   child block, including nested toggles — rather than any single paragraph.
+   ─────────────────────────────────────────────────────────────────────────── */
+.ProseMirror .toggle {
+  display: grid;
+  grid-template-columns: 1.25rem minmax(0, 1fr);
+  align-items: start;
+  margin-block: 0.35em;
+}
+
+.toggle-arrow {
+  grid-column: 1;
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.5rem;
+  margin-top: 0.05em;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.toggle-arrow:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.toggle-arrow svg {
+  transition: transform 140ms ease;
+}
+.ProseMirror .toggle[data-open='true'] > .toggle-arrow svg {
+  transform: rotate(90deg);
+}
+
+.toggle-inner {
+  grid-column: 2;
+  min-width: 0;
+}
+
+/* The whole subtree folds away together.
+   A descendant selector rather than a child one: Tiptap's React NodeViewContent
+   inserts its own wrapper element between `.toggle-inner` and the node's
+   children, so `>` would miss. Over-matching a nested toggle's content is
+   harmless — if an ancestor is collapsed, that content is already invisible,
+   and each toggle's own `data-open` still governs it once the ancestor
+   reopens (§29). */
+.ProseMirror .toggle[data-open='false'] [data-toggle-content] {
+  display: none;
+}
+
+[data-toggle-summary] {
+  font-weight: 550;
+  line-height: 1.55;
+  padding-block: 0.05em;
+  cursor: text;
+}
+
+[data-toggle-content] {
+  padding-block-start: 0.15em;
+  padding-bottom: 0.1em;
+}
+[data-toggle-content] > * + * {
+  margin-top: 0.45em;
+}
+
+/* Toggle headings (§32) — the title scales, the mechanism is identical.
+   `> .toggle-inner > * >` steps through Tiptap's React content wrapper and
+   stops there, so a nested toggle's title keeps its own size. */
+.ProseMirror .toggle[data-level='1'] > .toggle-inner > * > [data-toggle-summary] {
+  font-size: 1.34rem;
+  font-weight: 640;
+  letter-spacing: -0.014em;
+}
+.ProseMirror .toggle[data-level='2'] > .toggle-inner > * > [data-toggle-summary] {
+  font-size: 1.13rem;
+  font-weight: 620;
+  letter-spacing: -0.009em;
+}
+.ProseMirror .toggle[data-level='3'] > .toggle-inner > * > [data-toggle-summary] {
+  font-size: 1rem;
+  font-weight: 640;
+}
+.ProseMirror .toggle[data-level='1'],
+.ProseMirror .toggle[data-level='2'],
+.ProseMirror .toggle[data-level='3'] {
+  margin-block: 0.9em 0.35em;
+}
+
+/* Arabic titles put the arrow on the other side. `data-dir` is computed by the
+   node view from its own title, so a nested Arabic toggle cannot flip its
+   English parent. */
+.ProseMirror .toggle[data-dir='rtl'] {
+  grid-template-columns: minmax(0, 1fr) 1.25rem;
+}
+.ProseMirror .toggle[data-dir='rtl'] > .toggle-arrow {
+  grid-column: 2;
+  grid-row: 1;
+  transform: scaleX(-1);
+}
+.ProseMirror .toggle[data-dir='rtl'] > .toggle-inner {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Semantic study blocks (§22).
+
+   A 2px rule down the inline-start edge and a small caps label — no cards, no
+   fills, no icons. Seventeen block types have to be able to sit on one page
+   without the page turning into a colour chart.
+   ─────────────────────────────────────────────────────────────────────────── */
+.ProseMirror [data-semantic-block] {
+  --semantic-color: var(--color-hl-neutral);
+  border-inline-start: 2px solid color-mix(in srgb, var(--semantic-color) 75%, transparent);
+  padding-inline-start: 0.9em;
+  padding-block: 0.1em 0.15em;
+  margin-block: 0.8em;
+}
+
+/* icon + label in one line, drawn by CSS so the node's content stays purely
+   what the user wrote (§13 — small icon, small label, subtle accent). */
+.ProseMirror [data-semantic-block]::before {
+  content: attr(data-icon) '  ' attr(data-label);
+  display: block;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--semantic-color);
+  margin-bottom: 0.22em;
+  user-select: none;
+}
+
+.ProseMirror [data-kind='quran'],
+.ProseMirror [data-kind='benefit'] {
+  --semantic-color: var(--color-hl-green);
+}
+.ProseMirror [data-kind='hadith'],
+.ProseMirror [data-kind='athar'],
+.ProseMirror [data-kind='definition'] {
+  --semantic-color: var(--color-hl-blue);
+}
+.ProseMirror [data-kind='teacher'] {
+  --semantic-color: var(--color-hl-amber);
+}
+.ProseMirror [data-kind='important'],
+.ProseMirror [data-kind='warning'],
+.ProseMirror [data-kind='question'] {
+  --semantic-color: var(--color-hl-rose);
+}
+.ProseMirror [data-kind='scholar'],
+.ProseMirror [data-kind='qaidah'],
+.ProseMirror [data-kind='evidence'] {
+  --semantic-color: var(--color-hl-violet);
+}
+
+/* Toggle bodies collapse with the native <details> element. */
+.ProseMirror details > [data-toggle-content] {
+  padding-block-start: 0.2em;
+}
+
+/* §12 — direction and alignment are independent.
+   A block's direction sets its *default* alignment (text hangs from the start
+   of the line), but an explicit `data-align` always wins. `start`/`end` are
+   logical, so "aligned to the start" keeps meaning the same thing when the
+   direction flips. */
+.ProseMirror [dir='rtl'] {
+  text-align: right;
+}
+.ProseMirror [dir='ltr'] {
+  text-align: left;
+}
+
+.ProseMirror [data-align='start'] {
+  text-align: start;
+}
+.ProseMirror [data-align='center'] {
+  text-align: center;
+}
+.ProseMirror [data-align='end'] {
+  text-align: end;
+}
+.ProseMirror [data-align='justify'] {
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Source group (§27) — a passage and everything learned about it, tied
+   together by one quiet vertical rule running down the margin. This is the
+   "writing around the book" feeling made literal.
+   ─────────────────────────────────────────────────────────────────────────── */
+.ProseMirror [data-source-group] {
+  position: relative;
+  margin-block: 1.1em;
+  padding-inline-start: 1.15em;
+}
+
+.ProseMirror [data-source-group]::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.35em;
+  bottom: 0.35em;
+  width: 1.5px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--color-accent) 55%, transparent),
+    color-mix(in srgb, var(--color-line-strong) 70%, transparent)
+  );
+}
+
+/* Blocks inside a group sit closer together — they are one train of thought. */
+.ProseMirror [data-source-group] > * + * {
+  margin-top: 0.45em;
+}
+
+/* §28 — nesting inside a group indents against the rule rather than restarting. */
+.ProseMirror [data-source-group] [data-semantic-block] {
+  margin-block: 0.5em;
+}
+
+.source-quote {
+  margin-block: 0.2em 0.55em;
+}
+
+.source-quote-body {
+  position: relative;
+  border: 1px solid var(--color-line);
+  border-inline-start: 2px solid var(--quote-accent, var(--color-hl-amber));
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-panel) 65%, transparent);
+  padding: 0.5em 0.8em 0.55em;
+  transition: border-color 140ms ease;
+}
+
+.source-quote-body.is-active {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-panel));
+}
+
+.source-quote-label {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  margin-bottom: 0.3em;
+  user-select: none;
+}
+
+.source-quote-text {
+  white-space: pre-wrap;
+  color: var(--color-ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+.source-quote-text.font-arabic {
+  font-size: 1.3em;
+  line-height: 2.1;
+}
+
+.source-quote-link {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  margin-top: 0.45em;
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  transition: color 120ms ease;
+  max-width: 100%;
+}
+.source-quote-link:hover {
+  color: var(--color-accent);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Qur'ān and Ḥadīth blocks (§14, §15) — Arabic is the point, so it is set
+   large and given room; the metadata stays out of the way underneath.
+   ─────────────────────────────────────────────────────────────────────────── */
+.scripture {
+  position: relative;
+  margin-block: 1.15em;
+  padding-block: 0.75em;
+  padding-inline: 1.1em 0.4em;
+}
+
+.scripture-rule {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+}
+.scripture-quran .scripture-rule {
+  background: color-mix(in srgb, var(--color-hl-green) 70%, transparent);
+}
+.scripture-hadith .scripture-rule {
+  background: color-mix(in srgb, var(--color-hl-blue) 70%, transparent);
+}
+
+.scripture-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  margin-bottom: 0.3em;
+  user-select: none;
+}
+.scripture-kind {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.scripture-quran .scripture-kind {
+  color: var(--color-hl-green);
+}
+.scripture-hadith .scripture-kind {
+  color: var(--color-hl-blue);
+}
+.scripture-intro {
+  font-size: 1.05em;
+  color: var(--color-ink-muted);
+}
+
+.scripture-body {
+  font-size: 1.42em;
+  line-height: 2.15;
+  color: var(--color-ink);
+  min-height: 2em;
+}
+
+.scripture-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4em;
+  margin-top: 0.45em;
+}
+
+.scripture-meta-input,
+.scripture-translation {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.15em 0.35em;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  font-family: var(--font-sans);
+}
+.scripture-meta-input:hover,
+.scripture-translation:hover {
+  border-color: var(--color-line);
+}
+.scripture-meta-input:focus,
+.scripture-translation:focus {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink);
+  outline: none;
+}
+.scripture-meta-input::placeholder,
+.scripture-translation::placeholder {
+  color: var(--color-ink-faint);
+}
+
+.scripture-translation {
+  display: block;
+  width: 100%;
+  margin-top: 0.4em;
+  resize: vertical;
+  line-height: 1.6;
+  font-size: 12.5px;
+}
+
+.scripture-toggle {
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  padding: 0.15em 0.35em;
+  border-radius: 3px;
+}
+.scripture-toggle:hover {
+  color: var(--color-accent);
+  background: var(--color-hover);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Images and captured regions (§D14)
+
+   Controls stay out of sight until the block is hovered or selected, so a
+   chapter full of screenshots still reads as notes.
+   ─────────────────────────────────────────────────────────────────────────── */
+.image-block {
+  margin-block: 0.9em;
+  display: flex;
+}
+.image-block[data-align='start'] {
+  justify-content: flex-start;
+}
+.image-block[data-align='center'] {
+  justify-content: center;
+}
+.image-block[data-align='end'] {
+  justify-content: flex-end;
+}
+
+.image-block figure {
+  margin: 0;
+  max-width: 100%;
+}
+
+.image-frame {
+  position: relative;
+  display: block;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  background: #fff;
+}
+.image-block figure.is-selected .image-frame {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.image-block img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.image-skeleton {
+  height: 8rem;
+  background: var(--color-panel);
+}
+
+/* Resize grips on either edge — width only, so aspect ratio is preserved. */
+.image-grip {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 2.4rem;
+  margin-top: -1.2rem;
+  border-radius: 3px;
+  background: var(--color-accent);
+  opacity: 0;
+  cursor: ew-resize;
+  transition: opacity 120ms ease;
+}
+.image-grip-start {
+  left: 4px;
+}
+.image-grip-end {
+  right: 4px;
+}
+.image-block figure:hover .image-grip,
+.image-block figure.is-selected .image-grip {
+  opacity: 0.75;
+}
+
+.image-tools {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 5px;
+  border: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-elevated) 92%, transparent);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.image-block figure:hover .image-tools,
+.image-block figure.is-selected .image-tools {
+  opacity: 1;
+}
+.image-tools button {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+.image-tools button:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.image-tools button.is-active {
+  color: var(--color-accent);
+  background: var(--color-hover);
+}
+.image-tools-sep {
+  width: 1px;
+  height: 0.9rem;
+  margin: 0 2px;
+  background: var(--color-line);
+}
+
+.image-block figcaption {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding-top: 0.25em;
+}
+.image-block figcaption input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+  padding: 0.2em 0.1em;
+}
+.image-source {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  max-width: 55%;
+}
+.image-source:hover {
+  color: var(--color-accent);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Snip / capture mode (§D9)
+   ─────────────────────────────────────────────────────────────────────────── */
+.snip-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  cursor: crosshair;
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  touch-action: none;
+  user-select: none;
+}
+
+.snip-rect {
+  position: fixed;
+  border: 1.5px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow: 0 0 0 9999px color-mix(in srgb, var(--color-ink) 22%, transparent);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.snip-hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: var(--color-elevated);
+  color: var(--color-ink-muted);
+  font-size: 11.5px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+  pointer-events: none;
+}
+.snip-hint-key {
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  padding: 0 0.3em;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+
+/* A captured region is outlined rather than filled, so returning to it shows
+   you the rectangle without painting over the page (§D12). */
+.hl-capture-region {
+  position: absolute;
+  border: 1.5px dashed color-mix(in srgb, var(--color-accent) 80%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Tables
+   ─────────────────────────────────────────────────────────────────────────── */
+.ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-block: 0.9em;
+  font-size: 13px;
+  table-layout: fixed;
+  overflow: hidden;
+}
+.ProseMirror th,
+.ProseMirror td {
+  border: 1px solid var(--color-line);
+  padding: 0.4em 0.55em;
+  vertical-align: top;
+  position: relative;
+}
+.ProseMirror th {
+  background: var(--color-panel);
+  font-weight: 600;
+  text-align: start;
+}
+.ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  pointer-events: none;
+}
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Wiki links (§42)
+   ─────────────────────────────────────────────────────────────────────────── */
+.wiki-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 40%, transparent);
+  padding: 0 1px;
+  cursor: pointer;
+}
+.wiki-link:hover {
+  background: var(--color-accent-soft);
+}
+.wiki-link.is-unresolved {
+  color: var(--color-ink-muted);
+  border-bottom-style: dashed;
+  border-bottom-color: var(--color-line-strong);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Block handle and menus (§6, §7)
+   ─────────────────────────────────────────────────────────────────────────── */
+.block-handle {
+  position: absolute;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 22px;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: grab;
+  opacity: 0.75;
+  transition:
+    opacity 120ms ease,
+    background-color 120ms ease;
+}
+.block-handle:hover {
+  opacity: 1;
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
+}
+.block-handle:active {
+  cursor: grabbing;
+}
+
+.block-menu {
+  position: absolute;
+  z-index: 40;
+  width: 15rem;
+  padding: 0.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.1),
+    0 12px 32px rgb(0 0 0 / 0.12);
+}
+:root.dark .block-menu {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.4),
+    0 14px 36px rgb(0 0 0 / 0.45);
+}
+
+.block-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border-radius: 4px;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  text-align: start;
+}
+.block-menu-item:hover {
+  background: var(--color-hover);
+}
+.block-menu-item.is-danger:hover {
+  color: var(--color-hl-rose);
+}
+.block-menu-icon {
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+  flex-shrink: 0;
+}
+.block-menu-swatch {
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.block-menu-sep {
+  height: 1px;
+  margin: 0.25rem 0.15rem;
+  background: var(--color-line);
+}
+.block-menu-group {
+  padding: 0.4rem 0.5rem 0.2rem;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.block-menu-search {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.15rem;
+  border: none;
+  border-bottom: 1px solid var(--color-line);
+  background: transparent;
+  font-size: 12.5px;
+  color: var(--color-ink);
+  outline: none;
+}
+
+.slash-menu {
+  width: 17rem;
+  max-height: 21rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.1),
+    0 14px 36px rgb(0 0 0 / 0.14);
+}
+:root.dark .slash-menu {
+  box-shadow:
+    0 4px 12px rgb(0 0 0 / 0.4),
+    0 16px 40px rgb(0 0 0 / 0.5);
+}
+
+.slash-group {
+  padding: 0.45rem 0.5rem 0.2rem;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--color-ink-muted);
+  text-align: start;
+}
+.slash-item.is-active {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.slash-icon {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  flex-shrink: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+  background: var(--color-panel);
+}
+.slash-item.is-active .slash-icon {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink-muted);
+}
+
+/* Search-within-note highlight (§38) */
+.note-find-hit {
+  background: color-mix(in srgb, var(--color-hl-amber) 34%, transparent);
+  border-radius: 2px;
+}
+.note-find-hit.is-current {
+  background: color-mix(in srgb, var(--color-accent) 46%, transparent);
+  outline: 1px solid var(--color-accent);
+}
+
+@layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
