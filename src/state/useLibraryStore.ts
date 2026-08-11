@@ -25,6 +25,29 @@ interface LibraryState {
   toggleExpanded: (nodeId: string, collapsed: boolean) => Promise<void>
 }
 
+/**
+ * Puts the study session behind a node in place: the right PDF, the node's own
+ * notes document, and its page if it has one.
+ *
+ * Shared by opening a node and by restoring one at start-up, so a restored
+ * session is identical to one you just clicked into.
+ */
+async function reopen(nodeId: string): Promise<void> {
+  const node = await libraryRepo.get(nodeId)
+  if (!node) return
+
+  const bookId = await resolveBookId(node)
+  if (bookId) await useStudyStore.getState().openBook(bookId)
+
+  // §E10/§E45 — one stable notes document per node, reused forever.
+  const noteId = await ensureNodeNote(nodeId)
+  if (noteId) useStudyStore.getState().setActiveNote(noteId)
+
+  // §E13 — go to the chapter's page range if it has one; otherwise leave the
+  // reader where it was rather than jumping somewhere arbitrary.
+  if (node.pageStart) useStudyStore.getState().setPage(node.pageStart)
+}
+
 export const useLibraryStore = create<LibraryState>((set) => ({
   activeNodeId: null,
   hydrated: false,
@@ -34,15 +57,27 @@ export const useLibraryStore = create<LibraryState>((set) => ({
     // Only restore if the node still exists — a deleted chapter must not leave
     // the app pointing at nothing.
     const node = activeNodeId ? await libraryRepo.get(activeNodeId) : null
-    set({ activeNodeId: node ? activeNodeId : null, hydrated: true })
+    if (!node) {
+      set({ activeNodeId: null, hydrated: true })
+      return
+    }
+
+    // Mark hydrated first so the shell can render the study layout, then
+    // actually reopen the session. Restoring only the selection would leave
+    // the sidebar highlighting a chapter with no book and no notes behind it
+    // (§E31) — the point of Continue Studying is to land you back at work.
+    set({ activeNodeId, hydrated: true })
+    try {
+      await reopen(node.id)
+    } catch {
+      // A book whose file is missing should not block start-up; the reader
+      // surfaces its own error and the library stays usable.
+    }
   },
 
   async openNode(nodeId) {
     const node = await libraryRepo.get(nodeId)
     if (!node) return
-
-    const study = useStudyStore.getState()
-    const bookId = await resolveBookId(node)
 
     // A science or folder is a container, not a destination.
     if (node.type === 'science' || node.type === 'folder') {
@@ -50,16 +85,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
       return
     }
 
-    if (bookId) await study.openBook(bookId)
-
-    // §E10/§E45 — one stable notes document per node, reused forever.
-    const noteId = await ensureNodeNote(nodeId)
-    if (noteId) useStudyStore.getState().setActiveNote(noteId)
-
-    // §E13 — go to the chapter's page range if it has one; otherwise leave the
-    // reader where it was rather than jumping somewhere arbitrary.
-    if (node.pageStart) useStudyStore.getState().setPage(node.pageStart)
-
+    await reopen(nodeId)
     await libraryRepo.touch(nodeId)
     set({ activeNodeId: nodeId })
     void appStateRepo.set('activeLibraryNode', nodeId)
