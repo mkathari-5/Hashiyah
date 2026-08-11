@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { libraryRepo } from '@/db/repos/libraryTree'
 import { noteDocsRepo, notesRepo } from '@/db/repos/notes'
 import type { NoteLink, QuoteRef } from '@/types'
 
@@ -75,6 +76,47 @@ export function deriveTitle(doc: unknown): string | null {
     if (text) return text.slice(0, 80)
   }
   return null
+}
+
+/**
+ * Every toggle's open/closed state, keyed by block id (§E30).
+ *
+ * This is what revision mode records before it flattens a chapter, and what
+ * puts the reader's sections back afterwards.
+ */
+export function collectToggleStates(doc: unknown): Record<string, boolean> {
+  const states: Record<string, boolean> = {}
+  const visit = (node: RawNode | undefined) => {
+    if (!node || typeof node !== 'object') return
+    if (node.type === 'toggleBlock' && typeof node.attrs?.blockId === 'string') {
+      states[node.attrs.blockId] = node.attrs.open !== false
+    }
+    node.content?.forEach(visit)
+  }
+  visit(doc as RawNode)
+  return states
+}
+
+/**
+ * A copy of `doc` with each toggle's `open` set from `states`.
+ *
+ * Pure, and structural rather than positional: toggles are matched by block id,
+ * so a document edited during revision still gets exactly the sections it had
+ * back. Toggles the snapshot does not mention — ones written since — are left
+ * as they are. Nothing but the `open` attribute is touched, so block ids,
+ * source quotes and anchors pass through untouched.
+ */
+export function applyToggleStates(doc: unknown, states: Record<string, boolean>): unknown {
+  const visit = (node: RawNode): RawNode => {
+    const content = node.content?.map(visit)
+    const blockId = node.attrs?.blockId
+    const wanted = node.type === 'toggleBlock' && typeof blockId === 'string' ? states[blockId] : undefined
+
+    if (wanted === undefined) return content ? { ...node, content } : node
+    return { ...node, attrs: { ...node.attrs, open: wanted }, ...(content ? { content } : {}) }
+  }
+  if (!doc || typeof doc !== 'object') return doc
+  return visit(doc as RawNode)
 }
 
 /** Wiki links, derived the same way quote refs are — from the document itself. */
@@ -193,6 +235,15 @@ export class NoteValidationError extends Error {}
  * Persist a note. The document is validated first: if it is somehow malformed
  * we refuse the write and keep the last known-good version rather than
  * overwriting a good note with a broken one (§63 — data integrity beats polish).
+ *
+ * Titles: a note that a library node owns takes its identity from that node and
+ * is never renamed by what is written inside it. A chapter is `Chapter 3 — باب
+ * الخوف من الشرك`; an `H1` reading "Evidence from the Qurʾān" is a section of
+ * that chapter, not a new name for it. Ownership is read from the tree —
+ * `libraryNodes.noteId` — rather than inferred by comparing title strings,
+ * which would break the moment a reader legitimately renamed either one.
+ *
+ * A standalone note has no such identity, so it keeps deriving one (§17).
  */
 export async function saveNote(noteId: string, doc: unknown): Promise<void> {
   const parsed = pmDoc.safeParse(doc)
@@ -202,8 +253,9 @@ export async function saveNote(noteId: string, doc: unknown): Promise<void> {
   await noteDocsRepo.save(noteId, doc, collectQuoteRefs(doc, noteId), collectNoteLinks(doc, noteId))
 
   const title = deriveTitle(doc)
-  if (title) {
-    const note = await notesRepo.get(noteId)
-    if (note && note.title !== title) await notesRepo.update(noteId, { title })
-  }
+  if (!title) return
+  if (await libraryRepo.owner(noteId)) return
+
+  const note = await notesRepo.get(noteId)
+  if (note && note.title !== title) await notesRepo.update(noteId, { title })
 }

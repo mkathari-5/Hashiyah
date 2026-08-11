@@ -56,14 +56,13 @@ interface NotesState {
   /**
    * Revision mode (§E30, §6).
    *
-   * The snapshot is what makes this non-destructive: entering records every
-   * toggle's real state, and leaving puts it back. Without it, a glance at a
-   * chapter in revision mode would silently flatten how the reader had left
-   * their notes.
+   * Only the flag lives here. The snapshot of how the reader had actually left
+   * their toggles belongs to the open chapter's editor, which is what makes
+   * revision chapter-local: leaving a chapter cannot carry a snapshot of *its*
+   * sections into the next one, because there is nowhere for it to travel.
    */
   revisionMode: boolean
-  revisionSnapshot: Record<string, boolean> | null
-  setRevisionMode: (on: boolean, snapshot?: Record<string, boolean> | null) => void
+  setRevisionMode: (on: boolean) => void
 }
 
 let nonce = 0
@@ -85,18 +84,5 @@ export const useNotesStore = create<NotesState>((set) => ({
   clearScroll: () => set({ pendingScroll: null }),
 
   revisionMode: false,
-  revisionSnapshot: null,
-  setRevisionMode: (revisionMode, revisionSnapshot) =>
-    set((state) => ({
-      revisionMode,
-      /**
-       * The snapshot outlives the mode on purpose. Clearing it when revision
-       * is switched off would destroy the very thing the editor needs a moment
-       * later to put the reader's toggles back — leaving a chapter flattened
-       * simply because they glanced at it in revision mode.
-       *
-       * `undefined` means "leave it alone"; an explicit value replaces it.
-       */
-      revisionSnapshot: revisionSnapshot === undefined ? state.revisionSnapshot : revisionSnapshot,
-    })),
+  setRevisionMode: (revisionMode) => set({ revisionMode }),
 }))

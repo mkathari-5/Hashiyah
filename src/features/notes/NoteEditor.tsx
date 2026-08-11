@@ -21,7 +21,14 @@ import { SourceQuote } from '@/features/notes/extensions/SourceQuote'
 import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/extensions/Toggle'
 import { WikiLink, handleWikiLinkClick } from '@/features/notes/extensions/WikiLink'
 import { FormatBar } from '@/features/notes/FormatBar'
-import { saveNote, countWords, collectOutline, type OutlineEntry } from '@/services/notes/NotesService'
+import {
+  applyToggleStates,
+  collectOutline,
+  collectToggleStates,
+  countWords,
+  saveNote,
+  type OutlineEntry,
+} from '@/services/notes/NotesService'
 import { useAppStore } from '@/state/useAppStore'
 import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
@@ -93,7 +100,6 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const pendingScroll = useNotesStore((s) => s.pendingScroll)
   const clearScroll = useNotesStore((s) => s.clearScroll)
   const revisionMode = useNotesStore((s) => s.revisionMode)
-  const revisionSnapshot = useNotesStore((s) => s.revisionSnapshot)
   const setRevisionMode = useNotesStore((s) => s.setRevisionMode)
   const revealRequest = useStudyStore((s) => s.revealRequest)
 
@@ -104,6 +110,16 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const dirtyRef = useRef(false)
   const timerRef = useRef<number | undefined>(undefined)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * How the reader had actually left their toggles, held for as long as
+   * revision mode is flattening them; null whenever it is not (§E30).
+   *
+   * It lives in this component rather than in a store because it describes
+   * *this* document, and this component's lifetime is exactly the lifetime of
+   * that document being open.
+   */
+  const revisionSnapshotRef = useRef<Record<string, boolean> | null>(null)
 
   const editor = useEditor({
     extensions,
@@ -124,6 +140,22 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
     },
   })
 
+  /**
+   * What a save should write.
+   *
+   * While revising, the document on screen is deliberately flattened — that is
+   * the mode. Persisting it would turn a way of *reading* a chapter into an
+   * edit of it, so every save writes the reader's own toggle states back over
+   * the collapsed ones. This is why leaving a chapter mid-revision, by any
+   * route including closing the tab, cannot flatten it.
+   */
+  const documentToSave = useCallback(() => {
+    if (!editor) return null
+    const doc = editor.getJSON()
+    const snapshot = revisionSnapshotRef.current
+    return snapshot ? applyToggleStates(doc, snapshot) : doc
+  }, [editor])
+
   // ── Autosave ──────────────────────────────────────────────────────────────
   const flush = useCallback(async () => {
     if (!editor || !dirtyRef.current) return
@@ -131,7 +163,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
     window.clearTimeout(timerRef.current)
     markSaving()
     try {
-      await saveNote(noteIdRef.current, editor.getJSON())
+      await saveNote(noteIdRef.current, documentToSave())
       setSaveError(null)
       markSaved()
     } catch (error) {
@@ -139,7 +171,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
       setSaveError(error instanceof Error ? error.message : 'This note could not be saved.')
       markSaved()
     }
-  }, [editor, markSaving, markSaved])
+  }, [editor, documentToSave, markSaving, markSaved])
 
   useEffect(() => {
     if (!editor) return
@@ -278,28 +310,21 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   }, [editor, pendingScroll, loadedNoteId, clearScroll])
 
   // ── Revision mode (§E30) ──────────────────────────────────────────────────
-  const revisionApplied = useRef(false)
+  // Holding the snapshot is itself the record that revision is applied to this
+  // document: there is no second flag to fall out of step with it.
   useEffect(() => {
     if (!editor || loadedNoteId !== noteId) return
 
-    if (revisionMode && !revisionApplied.current) {
+    if (revisionMode && !revisionSnapshotRef.current) {
       // Record what the reader actually had open before flattening anything.
-      const snapshot: Record<string, boolean> = {}
-      editor.state.doc.descendants((node) => {
-        if (node.type.name === 'toggleBlock' && node.attrs.blockId) {
-          snapshot[node.attrs.blockId as string] = node.attrs.open !== false
-        }
-      })
-      setRevisionMode(true, snapshot)
+      revisionSnapshotRef.current = collectToggleStates(editor.getJSON())
       editor.commands.setAllTogglesOpen(false)
-      revisionApplied.current = true
       return
     }
 
-    if (!revisionMode && revisionApplied.current) {
+    if (!revisionMode && revisionSnapshotRef.current) {
       const snapshot = revisionSnapshotRef.current
-      revisionApplied.current = false
-      if (!snapshot) return
+      revisionSnapshotRef.current = null
       const tr = editor.state.tr
       let changed = false
       editor.state.doc.descendants((node, pos) => {
@@ -312,18 +337,21 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
       })
       if (changed) editor.view.dispatch(tr)
     }
-  }, [editor, revisionMode, loadedNoteId, noteId, setRevisionMode])
+  }, [editor, revisionMode, loadedNoteId, noteId])
 
-  // Read the snapshot through a ref so restoring never closes over a stale one.
-  const revisionSnapshotRef = useRef<Record<string, boolean> | null>(null)
-  revisionSnapshotRef.current = revisionSnapshot
-
-  // Switching notes ends revision mode: the snapshot belongs to the old note.
+  /**
+   * A note opens out of revision mode, always.
+   *
+   * Revision belongs to a reading of one chapter, and the panel remounts this
+   * editor per note, so a chapter switch mid-revision lands here: the previous
+   * chapter's sections have already gone back (every save writes the snapshot,
+   * see `documentToSave`), and the chapter now opening opens normally rather
+   * than inheriting a mode — or a snapshot — that described the last one.
+   */
   useEffect(() => {
-    if (revisionApplied.current) {
-      revisionApplied.current = false
-      setRevisionMode(false, null)
-    }
+    setRevisionMode(false)
+    // Deliberately not reacting to `revisionMode`: this is about arriving at a
+    // note, not about the reader turning the mode on while reading it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [noteId])
 

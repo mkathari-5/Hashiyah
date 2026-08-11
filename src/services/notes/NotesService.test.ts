@@ -1,8 +1,15 @@
-import { describe, expect, it } from 'vitest'
+import Dexie from 'dexie'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { db } from '@/db/db'
+import { libraryRepo } from '@/db/repos/libraryTree'
+import { notesRepo } from '@/db/repos/notes'
+import { ensureNodeNote } from '@/services/library/bootstrap'
 import {
+  applyToggleStates,
   collectNoteLinks,
   collectOutline,
   collectQuoteRefs,
+  collectToggleStates,
   countWords,
   deriveTitle,
   navigationOutline,
@@ -242,9 +249,143 @@ describe('countWords', () => {
   })
 })
 
+describe('collectToggleStates', () => {
+  it('records every toggle by block id, at any depth', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        { ...toggle('A', 'a'), attrs: { blockId: 'a', open: true } },
+        { ...toggle('B', 'b'), attrs: { blockId: 'b', open: false } },
+        {
+          ...toggle('C', 'c', [{ ...toggle('C nested', 'c1'), attrs: { blockId: 'c1', open: false } }]),
+          attrs: { blockId: 'c', open: true },
+        },
+      ],
+    }
+    expect(collectToggleStates(doc)).toEqual({ a: true, b: false, c: true, c1: false })
+  })
+
+  it('treats a toggle with no explicit state as open, the way the schema does', () => {
+    const doc = { type: 'doc', content: [{ ...toggle('A', 'a'), attrs: { blockId: 'a' } }] }
+    expect(collectToggleStates(doc)).toEqual({ a: true })
+  })
+})
+
+describe('applyToggleStates', () => {
+  const doc = {
+    type: 'doc',
+    content: [
+      { ...toggle('A', 'a'), attrs: { blockId: 'a', open: false } },
+      { ...toggle('B', 'b'), attrs: { blockId: 'b', open: false } },
+      { ...toggle('C', 'c'), attrs: { blockId: 'c', open: false } },
+    ],
+  }
+
+  it('puts the reader’s own sections back, by block id', () => {
+    const restored = applyToggleStates(doc, { a: true, b: false, c: true })
+    expect(collectToggleStates(restored)).toEqual({ a: true, b: false, c: true })
+  })
+
+  it('leaves the document it was given alone', () => {
+    applyToggleStates(doc, { a: true, b: true, c: true })
+    expect(collectToggleStates(doc)).toEqual({ a: false, b: false, c: false })
+  })
+
+  it('leaves a toggle written since the snapshot as it is', () => {
+    const withNew = { type: 'doc', content: [...doc.content, { ...toggle('D', 'd'), attrs: { blockId: 'd', open: false } }] }
+    expect(collectToggleStates(applyToggleStates(withNew, { a: true }))).toEqual({
+      a: true,
+      b: false,
+      c: false,
+      d: false,
+    })
+  })
+
+  it('changes nothing else — block ids, quotations and text all survive', () => {
+    const source = {
+      type: 'doc',
+      content: [
+        {
+          ...toggle('A', 'a', [quote('ann_1', 'blk_q'), { type: 'paragraph', attrs: { blockId: 'p1' }, content: [{ type: 'text', text: 'الحنيفية' }] }]),
+          attrs: { blockId: 'a', open: false },
+        },
+      ],
+    }
+    const restored = applyToggleStates(source, { a: true })
+    expect(collectQuoteRefs(restored, 'nt_1')).toEqual(collectQuoteRefs(source, 'nt_1'))
+    expect(JSON.stringify(restored).replace('"open":true', '"open":false')).toBe(JSON.stringify(source))
+  })
+})
+
 describe('saveNote', () => {
+  beforeEach(async () => {
+    await Dexie.waitFor(db.open())
+    await Promise.all(db.tables.map((t) => t.clear()))
+  })
+
   it('refuses a malformed document instead of overwriting a good note', async () => {
     await expect(saveNote('nt_1', { type: 'not-a-doc' })).rejects.toBeInstanceOf(NoteValidationError)
     await expect(saveNote('nt_1', null)).rejects.toBeInstanceOf(NoteValidationError)
+  })
+
+  /**
+   * §E5 — the library owns identity, the note owns content.
+   *
+   * Writing "Evidence from the Qurʾān" as the first heading of Chapter 3 is
+   * describing a section of that chapter. If that renamed the note, a reader
+   * would watch their chapter list rewrite itself as they took notes.
+   */
+  it('does not rename a chapter’s note from a heading written inside it', async () => {
+    const science = await libraryRepo.create({ parentId: null, type: 'science', title: 'ʿAqīdah' })
+    const chapter = await libraryRepo.create({
+      parentId: science.id,
+      type: 'chapter',
+      title: 'Chapter 3',
+      arabicTitle: 'باب الخوف من الشرك',
+    })
+    const noteId = (await ensureNodeNote(chapter.id))!
+
+    await saveNote(noteId, {
+      type: 'doc',
+      content: [heading(1, 'Evidence from the Qurʾān', 'h1')],
+    })
+
+    expect((await notesRepo.get(noteId))?.title).toBe('Chapter 3 — باب الخوف من الشرك')
+    // And the library entry itself is untouched, as is the link between them.
+    const after = await libraryRepo.get(chapter.id)
+    expect(after?.title).toBe('Chapter 3')
+    expect(after?.noteId).toBe(noteId)
+  })
+
+  it('keeps the quotation index for a chapter note it refuses to rename', async () => {
+    const chapter = await libraryRepo.create({ parentId: null, type: 'chapter', title: 'Chapter 3' })
+    const noteId = (await ensureNodeNote(chapter.id))!
+
+    await saveNote(noteId, {
+      type: 'doc',
+      content: [heading(1, 'Evidence from the Qurʾān', 'h1'), quote('ann_1', 'blk_q')],
+    })
+
+    const refs = await db.quoteRefs.where('noteId').equals(noteId).toArray()
+    expect(refs.map((r) => r.annotationId)).toEqual(['ann_1'])
+    expect((await notesRepo.get(noteId))?.title).toBe('Chapter 3')
+  })
+
+  it('still names a standalone note from what is written in it', async () => {
+    const note = await notesRepo.create({ bookId: null, title: 'Untitled note' })
+
+    await saveNote(note.id, { type: 'doc', content: [heading(1, 'Millat Ibrāhīm', 'h1')] })
+
+    expect((await notesRepo.get(note.id))?.title).toBe('Millat Ibrāhīm')
+  })
+
+  it('stops deriving a title the moment a note is filed in the library', async () => {
+    const note = await notesRepo.create({ bookId: null, title: 'Untitled note' })
+    await saveNote(note.id, { type: 'doc', content: [heading(1, 'Millat Ibrāhīm', 'h1')] })
+
+    await libraryRepo.create({ parentId: null, type: 'notes', title: 'Millat Ibrāhīm', noteId: note.id })
+    await saveNote(note.id, { type: 'doc', content: [heading(1, 'Something else entirely', 'h1')] })
+
+    expect((await notesRepo.get(note.id))?.title).toBe('Millat Ibrāhīm')
   })
 })

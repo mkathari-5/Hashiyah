@@ -35,6 +35,15 @@ export const libraryRepo = {
 
   forBook: (bookId: string) => db.libraryNodes.where('bookId').equals(bookId).toArray(),
 
+  /**
+   * The node whose stable notes document this is, if any (§E5, §E45).
+   *
+   * The authoritative answer to "does this note belong to the library?", which
+   * is what keeps a chapter's identity out of the hands of its own headings.
+   * Indexed on `noteId`, so it costs one lookup.
+   */
+  owner: (noteId: string) => db.libraryNodes.where('noteId').equals(noteId).first(),
+
   recent: (limit = 5) =>
     db.libraryNodes
       .orderBy('lastOpenedAt')

@@ -1,7 +1,7 @@
 import { db } from '@/db/db'
 import { mapRangeToSource, normalize, normalizeForSearch } from '@/lib/arabic'
 import { navigationOutline } from '@/services/notes/NotesService'
-import type { Annotation, Book, PageRecord } from '@/types'
+import type { Annotation, Book, LibraryNode, PageRecord } from '@/types'
 
 /**
  * SearchEngine.
@@ -120,8 +120,12 @@ export async function search(
   const titleOf = new Map(books.map((b) => [b.id, b.title]))
   let truncated = false
 
+  /** Set when the reader asked for "this book" and there is one to scope to. */
+  const scopedBookId = scope === 'book' ? context.bookId : null
+
   // ── Books ────────────────────────────────────────────────────────────────
   const bookHits: SearchHit[] = books
+    .filter((b: Book) => !scopedBookId || b.id === scopedBookId)
     .filter((b: Book) =>
       [b.title, b.arabicTitle, b.author, b.arabicAuthor]
         .filter(Boolean)
@@ -226,7 +230,7 @@ export async function search(
   }
 
   // ── Library tree and chapter outlines (§E26) ─────────────────────────────
-  const { libraryHits, outlineHits } = await searchLibrary(needle, titleOf)
+  const { libraryHits, outlineHits } = await searchLibrary(needle, titleOf, scopedBookId)
 
   return {
     query: rawQuery,
@@ -254,18 +258,42 @@ export async function search(
  * Outline entries are derived from the note documents themselves rather than
  * from a parallel index — the note is the source of truth, and a second copy of
  * every heading would only be one save away from being wrong.
+ *
+ * `scopedBookId` narrows the whole pass to one book. Scope has to be applied
+ * here rather than by filtering results afterwards: a chapter carries no
+ * `bookId` of its own, so which book an entry belongs to is a fact about the
+ * tree, and only the tree can answer it (§E26).
  */
 async function searchLibrary(
   needle: string,
   titleOf: Map<string, string>,
+  scopedBookId: string | null,
 ): Promise<{ libraryHits: SearchHit[]; outlineHits: SearchHit[] }> {
-  const nodes = await db.libraryNodes.toArray()
-  const byId = new Map(nodes.map((n) => [n.id, n]))
+  const all = await db.libraryNodes.toArray()
+  const byId = new Map(all.map((n) => [n.id, n]))
+
+  /**
+   * The nearest book at or above a node — the same rule `resolveBookId` uses
+   * when deciding which PDF a chapter shows, read from the nodes already in
+   * memory rather than a query per node.
+   */
+  const bookOf = (node: LibraryNode): string | null => {
+    let current: LibraryNode | undefined = node
+    const seen = new Set<string>()
+    while (current && !seen.has(current.id)) {
+      if (current.bookId) return current.bookId
+      seen.add(current.id)
+      current = current.parentId ? byId.get(current.parentId) : undefined
+    }
+    return null
+  }
+
+  const nodes = scopedBookId ? all.filter((node) => bookOf(node) === scopedBookId) : all
 
   /** `Kitāb at-Tawḥīd › Chapter 3` — where a result actually lives. */
-  const pathOf = (node: (typeof nodes)[number]): string => {
+  const pathOf = (node: LibraryNode): string => {
     const parts: string[] = []
-    let current: (typeof nodes)[number] | undefined = node
+    let current: LibraryNode | undefined = node
     const seen = new Set<string>()
     while (current && !seen.has(current.id)) {
       seen.add(current.id)
@@ -285,11 +313,15 @@ async function searchLibrary(
     if (!normalizeForSearch(haystack).includes(needle)) continue
     const parts = snippetFor(haystack, needle)
     if (!parts) continue
+    // The *effective* book, for the same reason the scope uses it: a chapter
+    // belongs to the book above it, and a result that claimed otherwise would
+    // be describing a different library from the one it was searched in.
+    const bookId = bookOf(node)
     libraryHits.push({
       id: `node:${node.id}`,
       kind: 'node',
-      bookId: node.bookId ?? null,
-      bookTitle: (node.bookId && titleOf.get(node.bookId)) || '',
+      bookId,
+      bookTitle: (bookId && titleOf.get(bookId)) || '',
       nodeId: node.id,
       noteId: node.noteId ?? undefined,
       path: pathOf(node),
@@ -303,6 +335,7 @@ async function searchLibrary(
     if (!node.noteId) continue
     const row = await db.noteDocs.get(node.noteId)
     if (!row) continue
+    const bookId = bookOf(node)
 
     for (const entry of navigationOutline(row.doc)) {
       if (outlineHits.length >= PER_GROUP_LIMIT) break
@@ -312,8 +345,8 @@ async function searchLibrary(
       outlineHits.push({
         id: `outline:${node.id}:${entry.blockId}`,
         kind: 'outline',
-        bookId: node.bookId ?? null,
-        bookTitle: (node.bookId && titleOf.get(node.bookId)) || '',
+        bookId,
+        bookTitle: (bookId && titleOf.get(bookId)) || '',
         nodeId: node.id,
         noteId: node.noteId,
         blockId: entry.blockId,
