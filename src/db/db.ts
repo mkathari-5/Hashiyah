@@ -10,6 +10,7 @@ import type {
   DocumentBlob,
   DocumentMeta,
   Lesson,
+  LibraryNode,
   Note,
   NoteDoc,
   NoteLink,
@@ -51,6 +52,7 @@ export class HashiyahDB extends Dexie {
   lessons!: Table<Lesson, string>
   noteLinks!: Table<NoteLink, string>
   assets!: Table<Asset, string>
+  libraryNodes!: Table<LibraryNode, string>
 
   constructor(name = 'hashiyah') {
     super(name)
@@ -89,6 +91,23 @@ export class HashiyahDB extends Dexie {
       notes: 'id, bookId, lessonId, updatedAt, order',
       noteLinks: 'id, sourceNoteId, targetType, targetId, [sourceNoteId+targetId]',
       assets: 'id, createdAt',
+    })
+
+    /**
+     * v3 — additive only. Introduces the library tree (Phase E).
+     *
+     * `libraryNodes` sits *beside* `subjects` and `books` rather than replacing
+     * them. A book node holds a `bookId` reference, so every existing PDF,
+     * page, annotation and anchor keeps working untouched and nothing is
+     * copied. `subjects` is left in place: it is still the shape older code
+     * paths read, and dropping a table is not something to do for tidiness.
+     *
+     * Populating the tree is a separate, idempotent bootstrap step (see
+     * `services/library/bootstrap.ts`) rather than an upgrade callback, so a
+     * failure there can never leave a half-migrated schema behind.
+     */
+    this.version(3).stores({
+      libraryNodes: 'id, parentId, type, order, bookId, noteId, favorite, lastOpenedAt',
     })
   }
 }

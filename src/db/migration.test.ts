@@ -165,14 +165,16 @@ beforeEach(async () => {
   await Dexie.delete(DB_NAME)
 })
 
-describe('schema v1 → v2', () => {
+describe('schema v1 → current', () => {
   it('carries every row forward untouched', async () => {
     await buildV1Database()
 
     const db = new HashiyahDB(DB_NAME)
     await db.open()
 
-    expect(db.verno).toBe(2)
+    // Deliberately not pinned to a number: this test guards the *data*, and
+    // should keep passing as new additive versions are added.
+    expect(db.verno).toBeGreaterThanOrEqual(2)
 
     // Nothing lost.
     expect(await db.books.count()).toBe(1)
@@ -251,7 +253,36 @@ describe('schema v1 → v2', () => {
 
     expect(await db.noteLinks.count()).toBe(0)
     expect(await db.assets.count()).toBe(0)
+    // The library tree is filled by an explicit, idempotent bootstrap step —
+    // never by the schema upgrade itself, so a failure there cannot leave the
+    // database half-migrated.
+    expect(await db.libraryNodes.count()).toBe(0)
 
+    db.close()
+  })
+
+  it('leaves the old subjects table in place rather than dropping it', async () => {
+    await buildV1Database()
+    await Dexie.waitFor(
+      (async () => {
+        const legacy = new Dexie(DB_NAME)
+        legacy.version(1).stores(V1_STORES)
+        await legacy.open()
+        await legacy.table('subjects').add({
+          id: 'sub_1',
+          parentId: null,
+          name: 'ʿAqīdah',
+          order: 0,
+          createdAt: 1,
+          updatedAt: 1,
+        })
+        legacy.close()
+      })(),
+    )
+
+    const db = new HashiyahDB(DB_NAME)
+    await db.open()
+    expect(await db.subjects.count()).toBe(1)
     db.close()
   })
 

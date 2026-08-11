@@ -43,6 +43,59 @@ export interface Book {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Library tree (Phase E)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * What a node in the library *is*. Deliberately a small vocabulary — the shape
+ * of a study library comes from nesting, not from having a type for everything.
+ *
+ *  science  a discipline: ʿAqīdah, Fiqh, Ḥadīth…
+ *  folder   a grouping inside one, when a science gets large
+ *  book     presents an existing Book record (never duplicates it)
+ *  course   a dawrah or lecture series
+ *  chapter  the study unit: a bāb, with its own notes
+ *  lesson   a session within a course
+ *  notes    a notes-only item — "Questions to ask Ustādh", a timetable
+ */
+export type LibraryNodeType = 'science' | 'folder' | 'book' | 'course' | 'chapter' | 'lesson' | 'notes'
+
+export interface LibraryNode {
+  id: string
+  /** null = a top-level entry under the implicit root. */
+  parentId: string | null
+  type: LibraryNodeType
+  order: number
+  title: string
+  arabicTitle?: string
+
+  /**
+   * The existing Book this node presents. The PDF, its pages, annotations and
+   * anchors all continue to live on the Book record — this is a reference, so
+   * nothing that already points at a book is disturbed.
+   */
+  bookId?: string | null
+  /**
+   * The node's own stable notes document. Created once, on first open, and
+   * reused forever after — clicking a chapter tomorrow reopens the same notes.
+   */
+  noteId?: string | null
+
+  favorite: boolean
+  /** Expansion state, so the tree looks the way you left it. */
+  collapsed: boolean
+
+  pageStart?: number | null
+  pageEnd?: number | null
+  teacher?: string
+  lessonNumber?: number
+
+  lastOpenedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Documents & pages
 // ─────────────────────────────────────────────────────────────────────────────
 

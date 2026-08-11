@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@/features/shell/AppShell'
+import { bootstrapLibrary } from '@/services/library/bootstrap'
 import { useAppStore } from '@/state/useAppStore'
 
 export function App() {
@@ -7,13 +8,22 @@ export function App() {
   const [fatal, setFatal] = useState<string | null>(null)
 
   useEffect(() => {
-    hydrate().catch((error) =>
-      setFatal(
-        error instanceof Error
-          ? `The local database could not be opened: ${error.message}`
-          : 'The local database could not be opened.',
-      ),
-    )
+    void (async () => {
+      try {
+        await hydrate()
+        // Fills in any missing library nodes for existing books and subjects.
+        // Idempotent, and deliberately *after* the schema is open: a failure
+        // here leaves the tree incomplete rather than the database broken, and
+        // the next start finishes the job.
+        await bootstrapLibrary()
+      } catch (error) {
+        setFatal(
+          error instanceof Error
+            ? `The local database could not be opened: ${error.message}`
+            : 'The local database could not be opened.',
+        )
+      }
+    })()
   }, [hydrate])
 
   if (fatal) {
