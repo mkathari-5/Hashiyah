@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { search, type SearchHit, type SearchResults, type SearchScope } from '@/services/search/SearchEngine'
 import { useAppStore } from '@/state/useAppStore'
+import { useLibraryStore } from '@/state/useLibraryStore'
+import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import { Icon } from '@/features/shell/Icon'
 
 const EMPTY: SearchResults = {
   query: '',
+  library: [],
+  outline: [],
   books: [],
   pages: [],
   notes: [],
@@ -23,6 +27,8 @@ export function SearchPanel() {
   const setPage = useStudyStore((s) => s.setPage)
   const requestJump = useStudyStore((s) => s.requestJump)
   const setActiveNote = useStudyStore((s) => s.setActiveNote)
+  const openNode = useLibraryStore((s) => s.openNode)
+  const requestScrollTo = useNotesStore((s) => s.requestScrollTo)
 
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState<SearchScope>('book')
@@ -65,9 +71,13 @@ export function SearchPanel() {
   const groups = useMemo(
     () =>
       [
+        // Notes first: searching a term you studied usually means "where did I
+        // write about this?", not "where does the word appear in a PDF?".
+        { title: 'In my chapters', hits: results.outline },
+        { title: 'Library', hits: results.library },
+        { title: 'My notes', hits: results.notes },
         { title: 'Books', hits: results.books },
         { title: 'Book text', hits: results.pages },
-        { title: 'My notes', hits: results.notes },
         { title: 'Highlights', hits: results.annotations },
       ].filter((g) => g.hits.length > 0),
     [results],
@@ -76,6 +86,19 @@ export function SearchPanel() {
   if (!open) return null
 
   const activate = async (hit: SearchHit) => {
+    // A library or outline result names the node, so opening it restores the
+    // whole context — book, chapter notes, sidebar selection — in one step.
+    if (hit.nodeId) {
+      await openNode(hit.nodeId)
+      if (hit.blockId && hit.noteId) {
+        // The editor may still be loading; the request carries its note id and
+        // is consumed once that document is in place.
+        requestScrollTo(hit.noteId, hit.blockId)
+      }
+      setOpen(false)
+      return
+    }
+
     if (hit.bookId && hit.bookId !== bookId) await openBook(hit.bookId)
     if (hit.kind === 'page' && hit.pageNumber) setPage(hit.pageNumber)
     if (hit.kind === 'annotation' && hit.annotationId) requestJump(hit.annotationId)
@@ -136,7 +159,11 @@ export function SearchPanel() {
                     className="hover:bg-hover block w-full rounded px-2 py-1.5 text-start"
                   >
                     <div className="text-ink-faint flex items-center gap-1.5 text-[10.5px]">
-                      <span className="truncate">{hit.bookTitle}</span>
+                      {/* A chapter result reads best as its path, so you can
+                          see which book and bāb it came from. */}
+                      <span className="truncate" dir="auto">
+                        {hit.path || hit.bookTitle}
+                      </span>
                       {hit.pageNumber && <span className="tabular-nums">· p. {hit.pageNumber}</span>}
                     </div>
                     <p

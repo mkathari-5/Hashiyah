@@ -1531,6 +1531,132 @@
   font-weight: 400;
 }
 
+/* ── Live chapter outline in the sidebar (§E29) ──────────────────────────── */
+.lib-outline {
+  margin-bottom: 0.2rem;
+}
+.lib-outline-head {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  padding-block: 0.15rem;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  text-align: start;
+}
+.lib-outline-head:hover {
+  color: var(--color-ink-muted);
+}
+.lib-outline-head svg {
+  transition: transform 120ms ease;
+}
+
+.lib-outline-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  width: 100%;
+  min-width: 0;
+  padding-block: 0.14rem;
+  padding-inline-end: 0.4rem;
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  text-align: start;
+  /* A questioning title is the point of the outline; keep it on one line so
+     the list stays scannable. */
+  white-space: nowrap;
+  overflow: hidden;
+}
+.lib-outline-item:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.lib-outline-item.is-heading {
+  font-weight: 600;
+}
+.lib-outline-mark {
+  flex-shrink: 0;
+  font-size: 8px;
+  color: var(--color-ink-faint);
+}
+.lib-outline-more {
+  padding-block: 0.15rem;
+  font-size: 11px;
+  color: var(--color-accent);
+  text-align: start;
+}
+.lib-outline-more:hover {
+  text-decoration: underline;
+}
+
+/* ── Revision mode (§E30) ────────────────────────────────────────────────── */
+.revision-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.7rem;
+  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-panel));
+  font-size: 11px;
+}
+.revision-label {
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+  color: var(--color-accent);
+  margin-inline-end: auto;
+}
+.revision-bar button {
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  color: var(--color-ink-muted);
+}
+.revision-bar button:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.revision-bar .revision-exit {
+  color: var(--color-accent);
+}
+
+/* Reading, not editing: the questions carry the page and the surrounding
+   apparatus recedes. Nothing is disabled — you can still open and write. */
+.note-surface.is-revising .ProseMirror .toggle {
+  margin-block: 0.15rem;
+}
+.note-surface.is-revising .ProseMirror .toggle[data-open='false'] [data-toggle-summary] {
+  padding-block: 0.3em;
+}
+
+/* Pulse when navigating to a block from the outline or a search result. */
+@keyframes block-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  25%,
+  60% {
+    background-color: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  }
+}
+.block-pulse {
+  animation: block-pulse 1.2s ease-in-out 1;
+  border-radius: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .block-pulse {
+    animation: none;
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 60%, transparent);
+    outline-offset: 2px;
+  }
+}
+
 .node-menu {
   position: fixed;
   z-index: 50;

@@ -5,6 +5,7 @@ import {
   collectQuoteRefs,
   countWords,
   deriveTitle,
+  navigationOutline,
   saveNote,
   NoteValidationError,
 } from './NotesService'
@@ -127,13 +128,23 @@ describe('collectNoteLinks', () => {
   })
 })
 
+const heading = (level: number, text: string, blockId: string) => ({
+  type: 'heading',
+  attrs: { level, blockId },
+  content: [{ type: 'text', text }],
+})
+
+const toggle = (title: string, blockId: string, body: unknown[] = []) => ({
+  type: 'toggleBlock',
+  attrs: { blockId, open: true },
+  content: [
+    { type: 'toggleSummary', content: [{ type: 'text', text: title }] },
+    { type: 'toggleContent', content: body.length ? body : [{ type: 'paragraph' }] },
+  ],
+})
+
 describe('collectOutline', () => {
   it('lists headings in order with their levels', () => {
-    const heading = (level: number, text: string, blockId: string) => ({
-      type: 'heading',
-      attrs: { level, blockId },
-      content: [{ type: 'text', text }],
-    })
     const doc = {
       type: 'doc',
       content: [
@@ -144,15 +155,73 @@ describe('collectOutline', () => {
       ],
     }
     expect(collectOutline(doc)).toEqual([
-      { blockId: 'b1', level: 1, text: 'Millat Ibrāhīm' },
-      { blockId: 'b2', level: 2, text: 'What is Ḥanīfiyyah?' },
-      { blockId: 'b3', level: 3, text: 'Evidence' },
+      { blockId: 'b1', kind: 'heading', level: 1, text: 'Millat Ibrāhīm' },
+      { blockId: 'b2', kind: 'heading', level: 2, text: 'What is Ḥanīfiyyah?' },
+      { blockId: 'b3', kind: 'heading', level: 3, text: 'Evidence' },
     ])
   })
 
-  it('skips empty headings rather than listing blanks', () => {
-    const doc = { type: 'doc', content: [{ type: 'heading', attrs: { level: 1, blockId: 'b' } }] }
+  it('includes toggle titles and records their nesting depth', () => {
+    const doc = {
+      type: 'doc',
+      content: [toggle('Benefits from this Āyah', 'b1', [toggle('Meaning of الاعتصام', 'b2')])],
+    }
+    expect(collectOutline(doc)).toEqual([
+      { blockId: 'b1', kind: 'toggle', level: 0, text: 'Benefits from this Āyah' },
+      { blockId: 'b2', kind: 'toggle', level: 1, text: 'Meaning of الاعتصام' },
+    ])
+  })
+
+  it('reads only the toggle title, never its body', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        toggle('What is الرياء?', 'b1', [
+          { type: 'paragraph', content: [{ type: 'text', text: 'A long answer nobody wants in the sidebar' }] },
+        ]),
+      ],
+    }
+    expect(collectOutline(doc).map((e) => e.text)).toEqual(['What is الرياء?'])
+  })
+
+  it('skips empty headings and untitled toggles rather than listing blanks', () => {
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'heading', attrs: { level: 1, blockId: 'b' } }, toggle('', 'b2')],
+    }
     expect(collectOutline(doc)).toEqual([])
+  })
+})
+
+describe('navigationOutline', () => {
+  it('keeps headings and top-level toggles, and drops nested ones', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        heading(1, 'Chapter 3', 'h1'),
+        toggle('Reason for this Chapter?', 't1'),
+        toggle('Benefits from this Āyah', 't2', [toggle('Meaning of الاعتصام', 't3')]),
+      ],
+    }
+    expect(navigationOutline(doc).map((e) => e.text)).toEqual([
+      'Chapter 3',
+      'Reason for this Chapter?',
+      'Benefits from this Āyah',
+    ])
+  })
+
+  it('leaves study blocks and quotations out of the sidebar entirely', () => {
+    const doc = {
+      type: 'doc',
+      content: [
+        toggle('What is الرياء?', 't1'),
+        { type: 'semanticBlock', attrs: { kind: 'benefit', blockId: 's1' }, content: [{ type: 'paragraph' }] },
+        { type: 'quranBlock', attrs: { blockId: 'q1' }, content: [{ type: 'text', text: 'إن إبراهيم كان أمة' }] },
+        { type: 'sourceGroup', content: [{ type: 'sourceQuote', attrs: { annotationId: 'a', blockId: 'sq' } }, { type: 'paragraph' }] },
+      ],
+    }
+    // The sidebar is navigation, not a second rendering of the note.
+    expect(navigationOutline(doc).map((e) => e.text)).toEqual(['What is الرياء?'])
   })
 })
 

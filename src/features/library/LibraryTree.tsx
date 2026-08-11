@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { Icon, type IconName } from '@/features/shell/Icon'
 import { useLibraryStore } from '@/state/useLibraryStore'
+import type { OutlineEntry } from '@/services/notes/NotesService'
 import type { LibraryNode, LibraryNodeType } from '@/types'
 
 /**
@@ -61,15 +62,26 @@ interface TreeProps {
   variant: 'home' | 'sidebar'
   onContextMenu?: (node: LibraryNode, event: React.MouseEvent) => void
   onAdd?: (node: LibraryNode) => void
+  /**
+   * §E29 — the active chapter's live outline, rendered beneath it. These are
+   * derived from the note's own content, not library records, so a heading is
+   * never duplicated into the database.
+   */
+  outline?: OutlineEntry[]
+  onOutlineJump?: (blockId: string) => void
 }
 
-export function LibraryTree({ variant, onContextMenu, onAdd }: TreeProps) {
+/** How many outline entries before folding the rest behind "More" (§E-3). */
+const OUTLINE_LIMIT = 8
+
+export function LibraryTree({ variant, onContextMenu, onAdd, outline, onOutlineJump }: TreeProps) {
   const nodes = useLiveQuery(() => libraryRepo.all(), [], [])
   const activeNodeId = useLibraryStore((s) => s.activeNodeId)
   const openNode = useLibraryStore((s) => s.openNode)
   const toggleExpanded = useLibraryStore((s) => s.toggleExpanded)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
+  const [outlineCollapsed, setOutlineCollapsed] = useState(false)
 
   const byParent = useMemo(() => {
     const map = new Map<string | null, LibraryNode[]>()
@@ -184,6 +196,18 @@ export function LibraryTree({ variant, onContextMenu, onAdd }: TreeProps) {
           )}
         </div>
 
+        {/* The active chapter's outline sits between the node and its children,
+            because it describes this node rather than being one. */}
+        {selected && outline && outline.length > 0 && (
+          <Outline
+            entries={outline}
+            depth={depth + 1}
+            onJump={onOutlineJump}
+            collapsed={outlineCollapsed}
+            onToggleCollapsed={() => setOutlineCollapsed((v) => !v)}
+          />
+        )}
+
         {expanded && children.length > 0 && (
           <ul>{children.map((child) => renderNode(child, depth + 1))}</ul>
         )}
@@ -203,5 +227,82 @@ export function LibraryTree({ variant, onContextMenu, onAdd }: TreeProps) {
 
   return (
     <ul className={`lib-tree lib-tree-${variant}`}>{roots.map((node) => renderNode(node, 0))}</ul>
+  )
+}
+
+/**
+ * The chapter's headings and top-level toggles.
+ *
+ * Long chapters fold behind "More" rather than growing a second scrollbar
+ * inside the sidebar — one coherent scroll surface is the whole point.
+ */
+function Outline({
+  entries,
+  depth,
+  onJump,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  entries: OutlineEntry[]
+  depth: number
+  onJump?: (blockId: string) => void
+  collapsed: boolean
+  onToggleCollapsed: () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const shown = expanded ? entries : entries.slice(0, OUTLINE_LIMIT)
+  const hidden = entries.length - shown.length
+
+  return (
+    <ul className="lib-outline">
+      <li>
+        <button
+          type="button"
+          className="lib-outline-head"
+          style={{ paddingInlineStart: `${depth * 0.85 + 0.35}rem` }}
+          onClick={onToggleCollapsed}
+          aria-expanded={!collapsed}
+        >
+          <Icon name="chevron-right" className={`h-2.5 w-2.5 ${collapsed ? '' : 'rotate-90'}`} />
+          In this chapter
+        </button>
+      </li>
+
+      {!collapsed &&
+        shown.map((entry, index) => (
+          <li key={`${entry.blockId}:${index}`}>
+            <button
+              type="button"
+              className={`lib-outline-item ${entry.kind === 'heading' ? 'is-heading' : ''}`}
+              style={{
+                paddingInlineStart: `${depth * 0.85 + 1.15 + (entry.kind === 'heading' ? (entry.level - 1) * 0.5 : 0)}rem`,
+              }}
+              onClick={() => onJump?.(entry.blockId)}
+              title={entry.text}
+              dir="auto"
+            >
+              {entry.kind === 'toggle' && (
+                <span className="lib-outline-mark" aria-hidden>
+                  ▸
+                </span>
+              )}
+              <span className="truncate">{entry.text}</span>
+            </button>
+          </li>
+        ))}
+
+      {!collapsed && hidden > 0 && (
+        <li>
+          <button
+            type="button"
+            className="lib-outline-more"
+            style={{ paddingInlineStart: `${depth * 0.85 + 1.15}rem` }}
+            onClick={() => setExpanded(true)}
+          >
+            {hidden} more…
+          </button>
+        </li>
+      )}
+    </ul>
   )
 }

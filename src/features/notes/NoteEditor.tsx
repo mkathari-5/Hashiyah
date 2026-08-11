@@ -90,6 +90,11 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const isLesson = useAppStore((s) => s.layout === 'lesson')
   const pendingInsert = useNotesStore((s) => s.pendingInsert)
   const clearInsert = useNotesStore((s) => s.clearInsert)
+  const pendingScroll = useNotesStore((s) => s.pendingScroll)
+  const clearScroll = useNotesStore((s) => s.clearScroll)
+  const revisionMode = useNotesStore((s) => s.revisionMode)
+  const revisionSnapshot = useNotesStore((s) => s.revisionSnapshot)
+  const setRevisionMode = useNotesStore((s) => s.setRevisionMode)
   const revealRequest = useStudyStore((s) => s.revealRequest)
 
   const [loadedNoteId, setLoadedNoteId] = useState<string | null>(null)
@@ -257,6 +262,71 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
     }
   }, [editor, revealRequest, loadedNoteId])
 
+  // ── Scroll to a block, from the sidebar outline or a search result ────────
+  useEffect(() => {
+    if (!editor || !pendingScroll || loadedNoteId !== pendingScroll.noteId) return
+
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-block-id="${pendingScroll.blockId}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // A brief pulse so the eye lands on the right block; the note itself is
+      // never modified by navigating to it.
+      el.classList.add('block-pulse')
+      window.setTimeout(() => el.classList.remove('block-pulse'), 1200)
+    }
+    clearScroll()
+  }, [editor, pendingScroll, loadedNoteId, clearScroll])
+
+  // ── Revision mode (§E30) ──────────────────────────────────────────────────
+  const revisionApplied = useRef(false)
+  useEffect(() => {
+    if (!editor || loadedNoteId !== noteId) return
+
+    if (revisionMode && !revisionApplied.current) {
+      // Record what the reader actually had open before flattening anything.
+      const snapshot: Record<string, boolean> = {}
+      editor.state.doc.descendants((node) => {
+        if (node.type.name === 'toggleBlock' && node.attrs.blockId) {
+          snapshot[node.attrs.blockId as string] = node.attrs.open !== false
+        }
+      })
+      setRevisionMode(true, snapshot)
+      editor.commands.setAllTogglesOpen(false)
+      revisionApplied.current = true
+      return
+    }
+
+    if (!revisionMode && revisionApplied.current) {
+      const snapshot = revisionSnapshotRef.current
+      revisionApplied.current = false
+      if (!snapshot) return
+      const tr = editor.state.tr
+      let changed = false
+      editor.state.doc.descendants((node, pos) => {
+        if (node.type.name !== 'toggleBlock') return
+        const was = snapshot[node.attrs.blockId as string]
+        if (was !== undefined && node.attrs.open !== was) {
+          tr.setNodeAttribute(pos, 'open', was)
+          changed = true
+        }
+      })
+      if (changed) editor.view.dispatch(tr)
+    }
+  }, [editor, revisionMode, loadedNoteId, noteId, setRevisionMode])
+
+  // Read the snapshot through a ref so restoring never closes over a stale one.
+  const revisionSnapshotRef = useRef<Record<string, boolean> | null>(null)
+  revisionSnapshotRef.current = revisionSnapshot
+
+  // Switching notes ends revision mode: the snapshot belongs to the old note.
+  useEffect(() => {
+    if (revisionApplied.current) {
+      revisionApplied.current = false
+      setRevisionMode(false, null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteId])
+
   // ── Find within note ──────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -296,9 +366,15 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
         </div>
       )}
 
-      <div ref={scrollRef} className="note-surface relative min-h-0 flex-1 overflow-y-auto px-8 py-5">
+      <div
+        ref={scrollRef}
+        className={`note-surface relative min-h-0 flex-1 overflow-y-auto px-8 py-5 ${
+          revisionMode ? 'is-revising' : ''
+        }`}
+      >
         <EditorContent editor={editor} />
-        <BlockHandle editor={editor} scrollRef={scrollRef} />
+        {/* The block grip is editing chrome, and revision is for reading. */}
+        {!revisionMode && <BlockHandle editor={editor} scrollRef={scrollRef} />}
       </div>
 
       <FormatBar editor={editor} />

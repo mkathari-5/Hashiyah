@@ -1,5 +1,6 @@
 import { db } from '@/db/db'
 import { mapRangeToSource, normalize, normalizeForSearch } from '@/lib/arabic'
+import { navigationOutline } from '@/services/notes/NotesService'
 import type { Annotation, Book, PageRecord } from '@/types'
 
 /**
@@ -21,12 +22,18 @@ export type SearchScope = 'book' | 'library'
 
 export interface SearchHit {
   id: string
-  kind: 'page' | 'note' | 'annotation' | 'book'
+  kind: 'page' | 'note' | 'annotation' | 'book' | 'node' | 'outline'
   bookId: string | null
   bookTitle: string
   pageNumber?: number
   noteId?: string
   annotationId?: string
+  /** Library node to select when this result is chosen. */
+  nodeId?: string
+  /** Block within the note to scroll to — an outline entry's anchor. */
+  blockId?: string
+  /** Breadcrumb such as `Kitāb at-Tawḥīd › Chapter 3`. */
+  path?: string
   /** Raw text around the match. */
   snippet: string
   /** Offsets of the match within `snippet`, for highlighting. */
@@ -37,6 +44,8 @@ export interface SearchHit {
 
 export interface SearchResults {
   query: string
+  library: SearchHit[]
+  outline: SearchHit[]
   books: SearchHit[]
   pages: SearchHit[]
   notes: SearchHit[]
@@ -50,6 +59,8 @@ const PER_GROUP_LIMIT = 40
 
 const EMPTY: SearchResults = {
   query: '',
+  library: [],
+  outline: [],
   books: [],
   pages: [],
   notes: [],
@@ -214,13 +225,103 @@ export async function search(
     })
   }
 
+  // ── Library tree and chapter outlines (§E26) ─────────────────────────────
+  const { libraryHits, outlineHits } = await searchLibrary(needle, titleOf)
+
   return {
     query: rawQuery,
+    library: libraryHits,
+    outline: outlineHits,
     books: bookHits,
     pages: pageHits,
     notes: noteHits,
     annotations: annotationHits,
-    total: bookHits.length + pageHits.length + noteHits.length + annotationHits.length,
+    total:
+      libraryHits.length +
+      outlineHits.length +
+      bookHits.length +
+      pageHits.length +
+      noteHits.length +
+      annotationHits.length,
     truncated,
   }
+}
+
+/**
+ * Sciences, books and chapters by title, and the headings and toggle titles
+ * inside each chapter's notes.
+ *
+ * Outline entries are derived from the note documents themselves rather than
+ * from a parallel index — the note is the source of truth, and a second copy of
+ * every heading would only be one save away from being wrong.
+ */
+async function searchLibrary(
+  needle: string,
+  titleOf: Map<string, string>,
+): Promise<{ libraryHits: SearchHit[]; outlineHits: SearchHit[] }> {
+  const nodes = await db.libraryNodes.toArray()
+  const byId = new Map(nodes.map((n) => [n.id, n]))
+
+  /** `Kitāb at-Tawḥīd › Chapter 3` — where a result actually lives. */
+  const pathOf = (node: (typeof nodes)[number]): string => {
+    const parts: string[] = []
+    let current: (typeof nodes)[number] | undefined = node
+    const seen = new Set<string>()
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id)
+      // Same precedence as everywhere else in the app: an Arabic title is
+      // something the reader typed, whereas `title` may still be the filename
+      // a PDF happened to arrive with.
+      parts.unshift(current.arabicTitle?.trim() || current.title)
+      current = current.parentId ? byId.get(current.parentId) : undefined
+    }
+    return parts.join(' › ')
+  }
+
+  const libraryHits: SearchHit[] = []
+  for (const node of nodes) {
+    if (libraryHits.length >= PER_GROUP_LIMIT) break
+    const haystack = [node.title, node.arabicTitle].filter(Boolean).join(' ')
+    if (!normalizeForSearch(haystack).includes(needle)) continue
+    const parts = snippetFor(haystack, needle)
+    if (!parts) continue
+    libraryHits.push({
+      id: `node:${node.id}`,
+      kind: 'node',
+      bookId: node.bookId ?? null,
+      bookTitle: (node.bookId && titleOf.get(node.bookId)) || '',
+      nodeId: node.id,
+      noteId: node.noteId ?? undefined,
+      path: pathOf(node),
+      ...parts,
+    })
+  }
+
+  const outlineHits: SearchHit[] = []
+  for (const node of nodes) {
+    if (outlineHits.length >= PER_GROUP_LIMIT) break
+    if (!node.noteId) continue
+    const row = await db.noteDocs.get(node.noteId)
+    if (!row) continue
+
+    for (const entry of navigationOutline(row.doc)) {
+      if (outlineHits.length >= PER_GROUP_LIMIT) break
+      if (!normalizeForSearch(entry.text).includes(needle)) continue
+      const parts = snippetFor(entry.text, needle)
+      if (!parts) continue
+      outlineHits.push({
+        id: `outline:${node.id}:${entry.blockId}`,
+        kind: 'outline',
+        bookId: node.bookId ?? null,
+        bookTitle: (node.bookId && titleOf.get(node.bookId)) || '',
+        nodeId: node.id,
+        noteId: node.noteId,
+        blockId: entry.blockId,
+        path: pathOf(node),
+        ...parts,
+      })
+    }
+  }
+
+  return { libraryHits, outlineHits }
 }

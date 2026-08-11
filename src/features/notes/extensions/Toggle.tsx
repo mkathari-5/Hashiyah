@@ -107,6 +107,10 @@ function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
       data-toggle=""
       data-open={open ? 'true' : 'false'}
       data-level={level || undefined}
+      // A node view does not inherit the attributes `renderHTML` would emit,
+      // so the block id has to be set explicitly — without it, jumping to a
+      // toggle from the outline or a search result finds nothing.
+      data-block-id={node.attrs.blockId ?? undefined}
       // Computed here rather than in CSS: a `:has()` rule would also match a
       // nested toggle's Arabic title and flip the wrong arrow.
       data-dir={detectDirection(node.child(0).textContent, 'ltr')}

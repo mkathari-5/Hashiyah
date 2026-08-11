@@ -110,32 +110,68 @@ export function collectNoteLinks(doc: unknown, noteId: string): Omit<NoteLink, '
 
 export interface OutlineEntry {
   blockId: string
+  kind: 'heading' | 'toggle'
+  /** Heading level 1–3, or nesting depth for a toggle (0 = top level). */
   level: number
   text: string
 }
 
-/** Headings, for the notes outline navigator (§17). */
+/**
+ * The navigable skeleton of a note (§17, §E29).
+ *
+ * Headings and toggle titles — the things a reader would use to find their way
+ * around a chapter. Deliberately *not* the note's full contents: the sidebar is
+ * navigation, and re-rendering every benefit, evidence block and quotation
+ * there would just be the note twice.
+ *
+ * Callers filter by `kind` and `level`; the sidebar shows headings plus
+ * top-level toggles, which is the shape of a revision chapter.
+ */
 export function collectOutline(doc: unknown): OutlineEntry[] {
   const out: OutlineEntry[] = []
   const textOf = (node: RawNode): string => node.text ?? (node.content ?? []).map(textOf).join('')
 
-  const visit = (node: RawNode | undefined) => {
+  const visit = (node: RawNode | undefined, toggleDepth: number) => {
     if (!node || typeof node !== 'object') return
+
     if (node.type === 'heading') {
       const text = textOf(node).trim()
       if (text) {
         out.push({
           blockId: String(node.attrs?.blockId ?? ''),
+          kind: 'heading',
           level: Number(node.attrs?.level ?? 1),
           text,
         })
       }
     }
-    node.content?.forEach(visit)
+
+    if (node.type === 'toggleBlock') {
+      // The title lives in the first child; the body is deliberately not read.
+      const summary = node.content?.find((child) => child.type === 'toggleSummary')
+      const text = summary ? textOf(summary).trim() : ''
+      if (text) {
+        out.push({
+          blockId: String(node.attrs?.blockId ?? ''),
+          kind: 'toggle',
+          level: toggleDepth,
+          text,
+        })
+      }
+      node.content?.forEach((child) => visit(child, toggleDepth + 1))
+      return
+    }
+
+    node.content?.forEach((child) => visit(child, toggleDepth))
   }
 
-  visit(doc as RawNode)
+  visit(doc as RawNode, 0)
   return out
+}
+
+/** What the study sidebar shows: headings and top-level toggles only (§E29). */
+export function navigationOutline(doc: unknown): OutlineEntry[] {
+  return collectOutline(doc).filter((entry) => entry.kind === 'heading' || entry.level === 0)
 }
 
 /** Word count for the status bar. Counts Arabic and Latin runs alike. */
