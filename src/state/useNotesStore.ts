@@ -44,6 +44,20 @@ export interface ScrollRequest {
   nonce: number
 }
 
+/**
+ * One chapter's revision, in progress.
+ *
+ * `originalToggleStates` is what makes the mode non-destructive: it is the
+ * document as the reader actually left it, kept apart from the flattened copy
+ * they are reading, and written back by every save.
+ */
+export interface RevisionSession {
+  noteId: string
+  active: boolean
+  /** Null until the editor has looked at the document and recorded it. */
+  originalToggleStates: Record<string, boolean> | null
+}
+
 interface NotesState {
   pendingInsert: InsertRequest | null
   requestInsert: (request: Omit<InsertRequest, 'nonce'>) => void
@@ -54,15 +68,24 @@ interface NotesState {
   clearScroll: () => void
 
   /**
-   * Revision mode (§E30, §6).
+   * The revision session (§E30, §6).
    *
-   * Only the flag lives here. The snapshot of how the reader had actually left
-   * their toggles belongs to the open chapter's editor, which is what makes
-   * revision chapter-local: leaving a chapter cannot carry a snapshot of *its*
-   * sections into the next one, because there is nowhere for it to travel.
+   * `noteId` is the whole design. Revision cannot be a global flag — the
+   * snapshot it depends on describes one document's sections, and a mode that
+   * outlived its chapter would flatten the next one. Nor can it live in the
+   * editor: the panel group remounts on every layout change, and a reader
+   * pressing Ctrl+3 has not asked to leave revision. So it lives here, named
+   * after the note it belongs to, and applies to nothing else.
    */
-  revisionMode: boolean
-  setRevisionMode: (on: boolean) => void
+  revision: RevisionSession | null
+  /** Turn revision on or off for one note. */
+  setRevisionMode: (noteId: string, on: boolean) => void
+  /** Record how the reader had left this note's toggles, once, on entry. */
+  captureRevisionStates: (noteId: string, states: Record<string, boolean>) => void
+  /** Leaving for another note ends revision; arriving at one says so. */
+  endRevisionElsewhere: (noteId: string) => void
+  /** Done: the sections have been put back. */
+  clearRevision: () => void
 }
 
 let nonce = 0
@@ -83,6 +106,41 @@ export const useNotesStore = create<NotesState>((set) => ({
   requestScrollTo: (noteId, blockId) => set({ pendingScroll: { noteId, blockId, nonce: ++nonce } }),
   clearScroll: () => set({ pendingScroll: null }),
 
-  revisionMode: false,
-  setRevisionMode: (revisionMode) => set({ revisionMode }),
+  revision: null,
+
+  setRevisionMode: (noteId, on) =>
+    set((state) => {
+      const current = state.revision?.noteId === noteId ? state.revision : null
+      if (on) {
+        // Re-entering the note keeps what was already recorded; anything
+        // belonging to another note is replaced outright, never merged.
+        return { revision: { noteId, active: true, originalToggleStates: current?.originalToggleStates ?? null } }
+      }
+      // Switching off leaves the session in place for one more moment: the
+      // editor still has to read it to put the reader's sections back.
+      return current ? { revision: { ...current, active: false } } : {}
+    }),
+
+  captureRevisionStates: (noteId, originalToggleStates) =>
+    set((state) =>
+      state.revision?.noteId === noteId && state.revision.originalToggleStates === null
+        ? { revision: { ...state.revision, originalToggleStates } }
+        : {},
+    ),
+
+  endRevisionElsewhere: (noteId) =>
+    set((state) => (state.revision && state.revision.noteId !== noteId ? { revision: null } : {})),
+
+  clearRevision: () => set({ revision: null }),
 }))
+
+/**
+ * Is revision on for this note?
+ *
+ * The only correct way to ask: a session for a different chapter is not this
+ * chapter's business, and reading the flag without the id is how revision
+ * escapes into the next document.
+ */
+export function isRevising(state: { revision: RevisionSession | null }, noteId: string | null): boolean {
+  return !!noteId && state.revision?.noteId === noteId && state.revision.active
+}

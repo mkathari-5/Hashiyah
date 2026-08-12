@@ -5,7 +5,7 @@ import { db } from '@/db/db'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { NoteEditor } from '@/features/notes/NoteEditor'
 import { collectToggleStates } from '@/services/notes/NotesService'
-import { useNotesStore } from '@/state/useNotesStore'
+import { isRevising, useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 
 /**
@@ -59,10 +59,18 @@ async function seedChapter(noteId: string, title: string, doc: unknown) {
   return node
 }
 
-/** The study session as the notes panel runs it: one editor per active note. */
-function Study() {
+/**
+ * The study session as the app actually runs it.
+ *
+ * Two remounts are modelled, because both are real: the notes panel keys the
+ * editor by note, and the shell keys the whole panel group by layout mode, so
+ * Ctrl+3 tears this subtree down and builds it again.
+ */
+function Study({ layout = 'three' }: { layout?: string }) {
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
-  return activeNoteId ? <NoteEditor key={activeNoteId} noteId={activeNoteId} /> : null
+  return (
+    <div key={layout}>{activeNoteId ? <NoteEditor key={activeNoteId} noteId={activeNoteId} /> : null}</div>
+  )
 }
 
 const toggles = () => Array.from(document.querySelectorAll<HTMLElement>('[data-toggle]'))
@@ -72,10 +80,18 @@ const openState = () =>
 const savedStates = async (noteId: string) =>
   collectToggleStates((await db.noteDocs.get(noteId))?.doc)
 
+const revising = (noteId: string) => isRevising(useNotesStore.getState(), noteId)
+
+/** Enter revision the way the panel's button does: for a named note. */
+const enterRevision = (noteId: string) =>
+  act(() => useNotesStore.getState().setRevisionMode(noteId, true))
+const exitRevision = (noteId: string) =>
+  act(() => useNotesStore.getState().setRevisionMode(noteId, false))
+
 beforeEach(async () => {
   await Dexie.waitFor(db.open())
   await Promise.all(db.tables.map((t) => t.clear()))
-  useNotesStore.setState({ revisionMode: false })
+  useNotesStore.setState({ revision: null })
   useStudyStore.setState({ activeNoteId: null, bookId: null, documentId: null })
   await seedChapter('nt_3', 'Chapter 3', CHAPTER_3)
   await seedChapter('nt_4', 'Chapter 4', CHAPTER_4)
@@ -87,7 +103,7 @@ describe('revision mode', () => {
     render(<Study />)
     await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
 
-    act(() => useNotesStore.getState().setRevisionMode(true))
+    enterRevision('nt_3')
 
     await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
   })
@@ -97,7 +113,7 @@ describe('revision mode', () => {
     render(<Study />)
     await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
 
-    act(() => useNotesStore.getState().setRevisionMode(true))
+    enterRevision('nt_3')
     await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
 
     // Long enough for the autosave the collapse itself triggers to land.
@@ -110,10 +126,10 @@ describe('revision mode', () => {
     render(<Study />)
     await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
 
-    act(() => useNotesStore.getState().setRevisionMode(true))
+    enterRevision('nt_3')
     await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
 
-    act(() => useNotesStore.getState().setRevisionMode(false))
+    exitRevision('nt_3')
 
     await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
     await waitFor(async () => expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true }))
@@ -129,7 +145,7 @@ describe('revision mode', () => {
       const view = render(<Study />)
       await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
 
-      act(() => useNotesStore.getState().setRevisionMode(true))
+      enterRevision('nt_3')
       await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
 
       // No Exit — straight to the next chapter, as a reader would.
@@ -148,20 +164,26 @@ describe('revision mode', () => {
     it('opens the new chapter normally rather than in revision', async () => {
       await reviseThenLeave()
 
-      expect(useNotesStore.getState().revisionMode).toBe(false)
+      expect(revising('nt_4')).toBe(false)
+      expect(revising('nt_3')).toBe(false)
+      // The session is gone, not merely ignored.
+      expect(useNotesStore.getState().revision).toBeNull()
       expect(openState()).toEqual({ d: true, e: true })
     })
 
     it('does not carry the previous chapter’s snapshot into the new one', async () => {
       await reviseThenLeave()
 
-      // Revising Chapter 4 must snapshot Chapter 4 — if Chapter 3's snapshot
-      // had travelled, leaving revision here would apply states for blocks
-      // this document has never had.
-      act(() => useNotesStore.getState().setRevisionMode(true))
-      await waitFor(() => expect(openState()).toEqual({ d: false, e: false }))
+      // Revising Chapter 4 must record Chapter 4 — if Chapter 3's session had
+      // travelled, leaving revision here would apply states for blocks this
+      // document has never had.
+      expect(useNotesStore.getState().revision).toBeNull()
 
-      act(() => useNotesStore.getState().setRevisionMode(false))
+      enterRevision('nt_4')
+      await waitFor(() => expect(openState()).toEqual({ d: false, e: false }))
+      expect(useNotesStore.getState().revision?.originalToggleStates).toEqual({ d: true, e: true })
+
+      exitRevision('nt_4')
       await waitFor(() => expect(openState()).toEqual({ d: true, e: true }))
       await waitFor(async () => expect(await savedStates('nt_4')).toEqual({ d: true, e: true }))
     })
@@ -174,7 +196,107 @@ describe('revision mode', () => {
       })
 
       await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
-      expect(useNotesStore.getState().revisionMode).toBe(false)
+      expect(revising('nt_3')).toBe(false)
+    })
+  })
+
+  /**
+   * Ctrl+3 and its friends rebuild the panel group, which rebuilds this
+   * editor. That is a change of *view*, not of chapter: the reader is still
+   * revising the same bāb and has not asked to stop.
+   */
+  describe('across a layout change', () => {
+    async function reviseThenChangeLayout() {
+      useStudyStore.setState({ activeNoteId: 'nt_3' })
+      const view = render(<Study layout="three" />)
+      await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
+
+      enterRevision('nt_3')
+      await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
+
+      // Focus the notes: the shell keys the panel group by layout, so this
+      // unmounts and remounts the editor on the very same note.
+      await act(async () => {
+        view.rerender(<Study layout="notes" />)
+      })
+      await waitFor(() => expect(Object.keys(openState())).toEqual(['a', 'b', 'c']))
+      return view
+    }
+
+    it('is still revising the same chapter afterwards', async () => {
+      await reviseThenChangeLayout()
+
+      expect(revising('nt_3')).toBe(true)
+      await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
+    })
+
+    it('keeps the states it recorded on entry rather than re-reading a collapsed document', async () => {
+      await reviseThenChangeLayout()
+
+      // The trap: re-snapshotting after the remount would record the flattened
+      // view, and exiting would then "restore" everything closed.
+      expect(useNotesStore.getState().revision?.originalToggleStates).toEqual({
+        a: true,
+        b: false,
+        c: true,
+      })
+    })
+
+    it('can still reveal a section after the layout change', async () => {
+      await reviseThenChangeLayout()
+
+      const arrow = toggles().find((el) => el.dataset.blockId === 'b')!.querySelector('button')!
+      act(() => arrow.click())
+
+      await waitFor(() => expect(openState()).toEqual({ a: false, b: true, c: false }))
+      // And revealing it still does not edit the chapter.
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true })
+    })
+
+    it('restores the reader’s own sections exactly when they finally exit', async () => {
+      const view = await reviseThenChangeLayout()
+
+      // Back to the three-panel layout first: two remounts, one session.
+      await act(async () => {
+        view.rerender(<Study layout="three" />)
+      })
+      await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
+      expect(revising('nt_3')).toBe(true)
+
+      exitRevision('nt_3')
+
+      await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
+      await waitFor(async () => expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true }))
+      expect(useNotesStore.getState().revision).toBeNull()
+    })
+
+    it('never persists the collapse at any point along the way', async () => {
+      const view = await reviseThenChangeLayout()
+      expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true })
+
+      await act(async () => {
+        view.rerender(<Study layout="three" />)
+      })
+      await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
+
+      // Every save between here and the end of the session — autosave, blur,
+      // the flush each remount performs — writes the reader's own states.
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true })
+    })
+
+    it('still ends revision when the chapter changes after a layout change', async () => {
+      await reviseThenChangeLayout()
+
+      await act(async () => {
+        useStudyStore.getState().setActiveNote('nt_4')
+      })
+      await waitFor(() => expect(Object.keys(openState())).toEqual(['d', 'e']))
+
+      expect(useNotesStore.getState().revision).toBeNull()
+      expect(openState()).toEqual({ d: true, e: true })
+      await waitFor(async () => expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true }))
     })
   })
 
@@ -183,7 +305,7 @@ describe('revision mode', () => {
     render(<Study />)
     await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
 
-    act(() => useNotesStore.getState().setRevisionMode(true))
+    enterRevision('nt_3')
     await waitFor(() => expect(openState()).toEqual({ a: false, b: false, c: false }))
 
     // Reveal B — the whole point of revision — then leave without exiting.

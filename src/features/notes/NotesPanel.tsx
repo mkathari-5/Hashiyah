@@ -7,7 +7,7 @@ import { OutlinePopover } from '@/features/notes/OutlinePopover'
 import { Icon } from '@/features/shell/Icon'
 import { displayTitle } from '@/lib/bookTitle'
 import { useAppStore } from '@/state/useAppStore'
-import { useNotesStore } from '@/state/useNotesStore'
+import { isRevising, useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { OutlineEntry } from '@/services/notes/NotesService'
 import type { Note } from '@/types'
@@ -29,9 +29,10 @@ export function NotesPanel() {
   const setLayout = useAppStore((s) => s.setLayout)
   const saving = useAppStore((s) => s.saving)
   const savedAt = useAppStore((s) => s.savedAt)
-  const revisionMode = useNotesStore((s) => s.revisionMode)
-  // The snapshot is managed by the editor, which takes it on entry and applies
-  // it on exit; the panel only flips the mode.
+  // Revision belongs to the note being read, so it is asked for by name. The
+  // editor records the snapshot on entry and applies it on exit; the panel
+  // only flips the mode.
+  const revisionMode = useNotesStore((s) => isRevising(s, activeNoteId))
   const setRevisionMode = useNotesStore((s) => s.setRevisionMode)
 
   const editorRef = useRef<NoteEditorHandle>(null)
@@ -132,7 +133,7 @@ export function NotesPanel() {
           {/* §E30 — revision is a way of reading a chapter, so it sits with
               the document's own controls rather than in the app chrome. */}
           <button
-            onClick={() => setRevisionMode(!revisionMode)}
+            onClick={() => activeNoteId && setRevisionMode(activeNoteId, !revisionMode)}
             aria-pressed={revisionMode}
             title={revisionMode ? 'Leave revision mode' : 'Revision mode — collapse everything and work through it'}
             className={`flex h-6 items-center gap-1 rounded px-1.5 text-[11px] ${
@@ -267,7 +268,10 @@ export function NotesPanel() {
           <span className="revision-label">Revision</span>
           <button onClick={() => editorRef.current?.collapseAll(true)}>Collapse all</button>
           <button onClick={() => editorRef.current?.collapseAll(false)}>Expand all</button>
-          <button className="revision-exit" onClick={() => setRevisionMode(false)}>
+          <button
+            className="revision-exit"
+            onClick={() => activeNoteId && setRevisionMode(activeNoteId, false)}
+          >
             Exit
           </button>
         </div>

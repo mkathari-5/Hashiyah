@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Highlight from '@tiptap/extension-highlight'
@@ -30,7 +31,7 @@ import {
   type OutlineEntry,
 } from '@/services/notes/NotesService'
 import { useAppStore } from '@/state/useAppStore'
-import { useNotesStore } from '@/state/useNotesStore'
+import { isRevising, useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 
 const AUTOSAVE_MS = 400
@@ -77,6 +78,27 @@ const extensions = [
   NoteFind,
 ]
 
+/**
+ * Put a recorded set of toggle states back into the live document.
+ *
+ * One transaction, and only where the state actually differs, so restoring a
+ * chapter the reader never touched is a no-op rather than a spurious edit.
+ * Toggles the recording does not mention — written since — are left alone.
+ */
+function applyStatesToDocument(editor: Editor, states: Record<string, boolean>) {
+  const tr = editor.state.tr
+  let changed = false
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name !== 'toggleBlock') return
+    const was = states[node.attrs.blockId as string]
+    if (was !== undefined && node.attrs.open !== was) {
+      tr.setNodeAttribute(pos, 'open', was)
+      changed = true
+    }
+  })
+  if (changed) editor.view.dispatch(tr)
+}
+
 export interface NoteEditorHandle {
   outline: () => OutlineEntry[]
   jumpToBlock: (blockId: string) => void
@@ -99,8 +121,10 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const clearInsert = useNotesStore((s) => s.clearInsert)
   const pendingScroll = useNotesStore((s) => s.pendingScroll)
   const clearScroll = useNotesStore((s) => s.clearScroll)
-  const revisionMode = useNotesStore((s) => s.revisionMode)
-  const setRevisionMode = useNotesStore((s) => s.setRevisionMode)
+  const revisionMode = useNotesStore((s) => isRevising(s, noteId))
+  const captureRevisionStates = useNotesStore((s) => s.captureRevisionStates)
+  const endRevisionElsewhere = useNotesStore((s) => s.endRevisionElsewhere)
+  const clearRevision = useNotesStore((s) => s.clearRevision)
   const revealRequest = useStudyStore((s) => s.revealRequest)
 
   const [loadedNoteId, setLoadedNoteId] = useState<string | null>(null)
@@ -110,16 +134,6 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const dirtyRef = useRef(false)
   const timerRef = useRef<number | undefined>(undefined)
   const scrollRef = useRef<HTMLDivElement>(null)
-
-  /**
-   * How the reader had actually left their toggles, held for as long as
-   * revision mode is flattening them; null whenever it is not (§E30).
-   *
-   * It lives in this component rather than in a store because it describes
-   * *this* document, and this component's lifetime is exactly the lifetime of
-   * that document being open.
-   */
-  const revisionSnapshotRef = useRef<Record<string, boolean> | null>(null)
 
   const editor = useEditor({
     extensions,
@@ -152,8 +166,12 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const documentToSave = useCallback(() => {
     if (!editor) return null
     const doc = editor.getJSON()
-    const snapshot = revisionSnapshotRef.current
-    return snapshot ? applyToggleStates(doc, snapshot) : doc
+    // Read at save time, and only for the note actually being written: a
+    // session belonging to another chapter must never touch this document.
+    const { revision } = useNotesStore.getState()
+    const original =
+      revision?.noteId === noteIdRef.current ? revision.originalToggleStates : null
+    return original ? applyToggleStates(doc, original) : doc
   }, [editor])
 
   // ── Autosave ──────────────────────────────────────────────────────────────
@@ -310,50 +328,44 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   }, [editor, pendingScroll, loadedNoteId, clearScroll])
 
   // ── Revision mode (§E30) ──────────────────────────────────────────────────
-  // Holding the snapshot is itself the record that revision is applied to this
-  // document: there is no second flag to fall out of step with it.
+  /**
+   * The session is in the store, so this effect is the only thing that has to
+   * be idempotent: it runs on entry, and again on every remount of a chapter
+   * still being revised — the same work either way. Collapsing an already
+   * collapsed document dispatches nothing.
+   */
   useEffect(() => {
     if (!editor || loadedNoteId !== noteId) return
+    const session = useNotesStore.getState().revision
+    const original = session?.noteId === noteId ? session.originalToggleStates : null
 
-    if (revisionMode && !revisionSnapshotRef.current) {
-      // Record what the reader actually had open before flattening anything.
-      revisionSnapshotRef.current = collectToggleStates(editor.getJSON())
+    if (revisionMode) {
+      // Record what the reader actually had open before flattening anything —
+      // once per session, so arriving back after a layout change re-reads
+      // nothing and the states stay the ones they started with.
+      if (!original) captureRevisionStates(noteId, collectToggleStates(editor.getJSON()))
       editor.commands.setAllTogglesOpen(false)
       return
     }
 
-    if (!revisionMode && revisionSnapshotRef.current) {
-      const snapshot = revisionSnapshotRef.current
-      revisionSnapshotRef.current = null
-      const tr = editor.state.tr
-      let changed = false
-      editor.state.doc.descendants((node, pos) => {
-        if (node.type.name !== 'toggleBlock') return
-        const was = snapshot[node.attrs.blockId as string]
-        if (was !== undefined && node.attrs.open !== was) {
-          tr.setNodeAttribute(pos, 'open', was)
-          changed = true
-        }
-      })
-      if (changed) editor.view.dispatch(tr)
+    if (original) {
+      applyStatesToDocument(editor, original)
+      clearRevision()
     }
-  }, [editor, revisionMode, loadedNoteId, noteId])
+  }, [editor, revisionMode, loadedNoteId, noteId, captureRevisionStates, clearRevision])
 
   /**
-   * A note opens out of revision mode, always.
+   * Arriving at a note ends any revision of a different one.
    *
-   * Revision belongs to a reading of one chapter, and the panel remounts this
-   * editor per note, so a chapter switch mid-revision lands here: the previous
-   * chapter's sections have already gone back (every save writes the snapshot,
-   * see `documentToSave`), and the chapter now opening opens normally rather
-   * than inheriting a mode — or a snapshot — that described the last one.
+   * A chapter switch mid-revision lands here: the chapter being left has
+   * already had its own sections saved (`documentToSave` runs in the unmount
+   * flush, before this), and the one now opening opens normally. A layout
+   * change remounts this editor with the *same* note, so it deliberately
+   * changes nothing — pressing Ctrl+3 is not a request to stop revising.
    */
   useEffect(() => {
-    setRevisionMode(false)
-    // Deliberately not reacting to `revisionMode`: this is about arriving at a
-    // note, not about the reader turning the mode on while reading it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [noteId])
+    endRevisionElsewhere(noteId)
+  }, [noteId, endRevisionElsewhere])
 
   // ── Find within note ──────────────────────────────────────────────────────
   useEffect(() => {
