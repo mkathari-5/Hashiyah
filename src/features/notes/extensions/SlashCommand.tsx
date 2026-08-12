@@ -118,13 +118,26 @@ export const SlashCommand = Extension.create({
     let renderer: ReactRenderer<ListHandle, ListProps> | null = null
     let container: HTMLElement | null = null
 
-    const place = (rect: DOMRect | null) => {
+    /**
+     * Keeps the menu on screen.
+     *
+     * The measurement has to come from the menu itself rather than its
+     * wrapper, and on the first call React has not painted it yet — taking a
+     * zero height there is what let the list run off the bottom of the window
+     * when the caret was low on the page (§F16).
+     */
+    const place = (rect: DOMRect | null, retry = true) => {
       if (!container || !rect) return
-      const box = container.getBoundingClientRect()
+      const menu = (container.firstElementChild as HTMLElement | null) ?? container
+      const box = menu.getBoundingClientRect()
+      if (!box.height && retry) {
+        requestAnimationFrame(() => place(rect, false))
+        return
+      }
       const below = rect.bottom + 6
       const top = below + box.height > window.innerHeight - 8 ? rect.top - box.height - 6 : below
       container.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - box.width - 8))}px`
-      container.style.top = `${Math.max(8, top)}px`
+      container.style.top = `${Math.max(8, Math.min(top, window.innerHeight - box.height - 8))}px`
     }
 
     return [

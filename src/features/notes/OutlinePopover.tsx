@@ -33,15 +33,10 @@ export function OutlinePopover({
   }, [onClose])
 
   return (
-    <div
-      ref={ref}
-      className="border-line bg-elevated absolute end-2 top-10 z-40 max-h-80 w-64 overflow-y-auto rounded-md border p-1 shadow-xl"
-    >
-      <div className="text-ink-faint px-2 pt-1.5 pb-1 text-[9.5px] font-semibold tracking-wider uppercase">
-        Outline
-      </div>
+    <div ref={ref} className="outline-pop">
+      <div className="block-menu-group">Outline</div>
       {entries.length === 0 ? (
-        <p className="text-ink-faint px-2 py-3 text-xs">
+        <p className="outline-pop-empty">
           No headings yet. Use <span className="text-ink-muted">/heading</span> to structure a long
           lesson.
         </p>
@@ -53,11 +48,17 @@ export function OutlinePopover({
               onJump(entry.blockId)
               onClose()
             }}
-            className="hover:bg-hover text-ink-muted hover:text-ink block w-full truncate rounded px-2 py-1 text-start text-[12.5px]"
-            style={{ paddingInlineStart: `${0.5 + (entry.level - 1) * 0.75}rem` }}
+            className={`outline-pop-item ${entry.kind === 'heading' ? 'is-heading' : ''}`}
+            style={{ paddingInlineStart: `${0.45 + (entry.level - 1) * 0.7}rem` }}
             dir="auto"
+            title={entry.text}
           >
-            {entry.text}
+            {entry.kind === 'toggle' && (
+              <span className="lib-outline-mark" aria-hidden>
+                ▸
+              </span>
+            )}
+            <span className="truncate">{entry.text}</span>
           </button>
         ))
       )}

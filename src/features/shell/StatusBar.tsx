@@ -8,8 +8,6 @@ import { useAppStore } from '@/state/useAppStore'
 import { useStudyStore } from '@/state/useStudyStore'
 
 export function StatusBar() {
-  const saving = useAppStore((s) => s.saving)
-  const savedAt = useAppStore((s) => s.savedAt)
   const layout = useAppStore((s) => s.layout)
   const toggleLessonMode = useAppStore((s) => s.toggleLessonMode)
 
@@ -33,28 +31,22 @@ export function StatusBar() {
     return db.annotations.where('[documentId+pageNumber]').equals([documentId, currentPage]).count()
   }, [documentId, currentPage], 0)
 
-  const [savedLabel, setSavedLabel] = useState(false)
-  useEffect(() => {
-    if (!savedAt) return
-    setSavedLabel(true)
-    const timer = setTimeout(() => setSavedLabel(false), 1800)
-    return () => clearTimeout(timer)
-  }, [savedAt])
-
   const indexing = documentId && pageCount > 0 && indexed < pageCount
   const noTextLayer = pageOnScreen && !pageOnScreen.hasTextLayer
 
+  // On the library home there is nothing to report, and an empty grey strip
+  // along the bottom of the entrance is pure chrome (§F19).
+  if (!book && !indexing && !noTextLayer && layout !== 'lesson') return null
+
   return (
-    <footer className="border-line bg-panel text-ink-faint flex h-7 shrink-0 items-center gap-3 border-t px-3 text-[11px]">
-      {book ? (
+    <footer className="status-bar">
+      {book && (
         <>
           <span className="truncate">{book.title}</span>
           <span className="tabular-nums">
             p. {currentPage} / {pageCount}
           </span>
         </>
-      ) : (
-        <span>No book open</span>
       )}
 
       {noTextLayer && (
@@ -76,10 +68,8 @@ export function StatusBar() {
           </span>
         )}
 
-        <span className="min-w-14 text-end">
-          {saving ? 'Saving…' : savedLabel ? 'Saved ✓' : ''}
-        </span>
-
+        {/* Saving is reported beside the manuscript being saved; a second
+            copy down here only made the two disagree by a frame. */}
         {layout === 'lesson' && <LessonTimer onExit={toggleLessonMode} />}
       </div>
     </footer>

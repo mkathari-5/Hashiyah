@@ -425,26 +425,25 @@ function IconButton({
 
 function ReaderMessage({ children, tone }: { children: React.ReactNode; tone?: 'error' }) {
   return (
-    <div className="grid h-full place-items-center p-8">
-      <p className={`max-w-sm text-center text-sm ${tone === 'error' ? 'text-hl-rose' : 'text-ink-faint'}`}>
-        {children}
-      </p>
+    <div className="empty-state">
+      <p className={`empty-state-line ${tone === 'error' ? 'text-hl-rose' : ''}`}>{children}</p>
+      {tone === 'error' && (
+        <p className="empty-state-hint">The notes beside this book are unaffected.</p>
+      )}
     </div>
   )
 }
 
 function EmptyReader() {
   return (
-    <div className="grid h-full place-items-center p-8">
-      <div className="max-w-xs text-center">
-        <div className="text-ink-faint font-arabic mb-3 text-3xl" dir="rtl">
-          حاشية
-        </div>
-        <p className="text-ink-muted text-sm">Open a book from the library, or drop a PDF anywhere.</p>
-        <p className="text-ink-faint mt-3 text-xs">
-          Press <Kbd>Ctrl</Kbd> <Kbd>K</Kbd> for commands
-        </p>
+    <div className="empty-state">
+      <div className="text-ink-faint font-arabic mb-1 text-2xl" dir="rtl">
+        حاشية
       </div>
+      <p className="empty-state-line">Open a book from the library, or drop a PDF anywhere.</p>
+      <p className="empty-state-hint">
+        Press <Kbd>Ctrl</Kbd> <Kbd>K</Kbd> for commands
+      </p>
     </div>
   )
 }

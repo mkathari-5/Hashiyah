@@ -41,6 +41,7 @@ const PATHS = {
   snip: 'M2 5.5h2M12 5.5h2M2 10.5h2M12 10.5h2M5.5 2v2M5.5 12v2M10.5 2v2M10.5 12v2M5.5 5.5h5v5h-5z',
   'snip-explain': 'M2 5.5h2M12 5.5h2M2 10.5h2M5.5 2v2M5.5 12v2M10.5 2v2M5.5 5.5h5v5h-5zM11 12.5h3.5M12.75 10.75v3.5',
   layers: 'M8 2l6 3-6 3-6-3zM2 8l6 3 6-3M2 11l6 3 6-3',
+  pencil: 'M10.6 2.9l2.5 2.5M3 13.1l.6-2.6 7-7 2.5 2.5-7 7z',
 } as const
 
 export type IconName = keyof typeof PATHS

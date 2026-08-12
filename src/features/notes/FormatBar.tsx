@@ -209,7 +209,7 @@ export function FormatBar({ editor }: { editor: Editor }) {
       ref={barRef}
       role="toolbar"
       aria-label="Text formatting"
-      className="border-line bg-elevated fixed z-50 flex max-w-[min(34rem,calc(100vw-1rem))] flex-wrap items-center gap-0.5 rounded-md border p-1 shadow-lg"
+      className="format-bar"
       style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999 }}
     >
       <Menu id="turn" label="Turn into">

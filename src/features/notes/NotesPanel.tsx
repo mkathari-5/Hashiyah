@@ -1,7 +1,9 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { booksRepo, subjectsRepo } from '@/db/repos/library'
+import { libraryRepo } from '@/db/repos/libraryTree'
 import { notesRepo } from '@/db/repos/notes'
+import { NodeTitle } from '@/features/library/LibraryTree'
 import { NoteEditor, type NoteEditorHandle } from '@/features/notes/NoteEditor'
 import { OutlinePopover } from '@/features/notes/OutlinePopover'
 import { Icon } from '@/features/shell/Icon'
@@ -24,7 +26,6 @@ export function NotesPanel() {
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
   const setActiveNote = useStudyStore((s) => s.setActiveNote)
   const revealRequest = useStudyStore((s) => s.revealRequest)
-  const currentPage = useStudyStore((s) => s.currentPage)
   const layout = useAppStore((s) => s.layout)
   const setLayout = useAppStore((s) => s.setLayout)
   const saving = useAppStore((s) => s.saving)
@@ -36,6 +37,7 @@ export function NotesPanel() {
   const setRevisionMode = useNotesStore((s) => s.setRevisionMode)
 
   const editorRef = useRef<NoteEditorHandle>(null)
+  const activeTabRef = useRef<HTMLButtonElement>(null)
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [outline, setOutline] = useState<OutlineEntry[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
@@ -59,6 +61,15 @@ export function NotesPanel() {
     async () => (book?.subjectId ? (await subjectsRepo.all()).find((s) => s.id === book.subjectId) : undefined),
     [book?.subjectId],
   )
+  /**
+   * §F25 — a chapter note's visible identity is the library node's title, not
+   * whatever string happens to sit on the note row. Rendering through NodeTitle
+   * also keeps mixed English/Arabic titles correctly isolated.
+   */
+  const libraryOwner = useLiveQuery(
+    () => (activeNoteId ? libraryRepo.owner(activeNoteId) : undefined),
+    [activeNoteId],
+  )
   const noteList = useMemo(() => notes ?? [], [notes])
 
   useEffect(() => {
@@ -68,6 +79,13 @@ export function NotesPanel() {
   useEffect(() => {
     if (!activeNoteId && noteList.length) setActiveNote(noteList[0].id)
   }, [activeNoteId, noteList, setActiveNote])
+
+  // A note reached from search or from the library may be off the end of the
+  // strip; leaving the reader looking at a tab bar with nothing selected is
+  // how a panel starts to feel broken.
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [activeNoteId])
 
   useEffect(() => {
     if (!savedAt) return
@@ -100,8 +118,8 @@ export function NotesPanel() {
   // Only truly empty when there is neither a book nor a notes-only item open.
   if (!bookId && !activeNoteId) {
     return (
-      <div className="text-ink-faint grid h-full place-items-center px-6 text-center text-xs">
-        Open something from the library to start writing.
+      <div className="empty-state">
+        <p className="empty-state-line">Open a chapter from the library to start writing.</p>
       </div>
     )
   }
@@ -112,43 +130,56 @@ export function NotesPanel() {
   return (
     <div className="bg-canvas flex h-full min-h-0 flex-col">
       {/* ── Header ─────────────────────────────────────────────────────── */}
-      <header className="border-line bg-panel relative shrink-0 border-b">
-        <div className="flex items-center gap-1 px-2.5 pt-1.5">
-          <nav className="text-ink-faint flex min-w-0 flex-1 items-center gap-1 text-[10.5px]">
-            {subject && (
-              <>
-                <span className="truncate">{subject.name}</span>
-                <span aria-hidden>/</span>
-              </>
+      {/* In focus mode the header lines up with the manuscript's measure
+          rather than running the full width of the display (§F9). */}
+      <header className={`notes-header ${notesFocused ? 'is-focused' : ''}`}>
+        <nav className="notes-crumb">
+          {subject && (
+            <>
+              <span className="truncate">{subject.name}</span>
+              <span aria-hidden>/</span>
+            </>
+          )}
+          <button onClick={() => setLayout('three')} className="truncate" title="Show the book">
+            {displayTitle(book)}
+          </button>
+        </nav>
+
+        {/**
+         * §F10 — the chapter's name is the header. The controls sit on its
+         * line and stay quiet, so the panel opens with one clear identity
+         * rather than a row of five equally loud buttons.
+         */}
+        <div className="notes-identity">
+          <h2 className="notes-title">
+            {libraryOwner ? (
+              <NodeTitle node={libraryOwner} className="notes-title-parts" />
+            ) : (
+              <span dir="auto">{active?.title ?? 'No note yet'}</span>
             )}
-            <button
-              onClick={() => setLayout('three')}
-              className="hover:text-ink-muted truncate transition-colors"
-              title="Show the book"
-            >
-              {displayTitle(book)}
-            </button>
-          </nav>
+          </h2>
 
           {/* §E30 — revision is a way of reading a chapter, so it sits with
-              the document's own controls rather than in the app chrome. */}
-          <button
-            onClick={() => activeNoteId && setRevisionMode(activeNoteId, !revisionMode)}
-            aria-pressed={revisionMode}
-            title={revisionMode ? 'Leave revision mode' : 'Revision mode — collapse everything and work through it'}
-            className={`flex h-6 items-center gap-1 rounded px-1.5 text-[11px] ${
-              revisionMode ? 'bg-accent-soft text-accent' : 'text-ink-faint hover:bg-hover hover:text-ink-muted'
-            }`}
-          >
-            <Icon name="layers" className="h-3 w-3" />
-            Revision
-          </button>
+              the document's own controls rather than in the app chrome. While
+              it is running the revision bar owns the controls and this would
+              only be a second way to say the same thing. */}
+          {!revisionMode && (
+            <button
+              onClick={() => activeNoteId && setRevisionMode(activeNoteId, true)}
+              aria-pressed={false}
+              title="Revision mode — collapse everything and work through it"
+              className="notes-action is-labelled"
+            >
+              <Icon name="layers" className="h-3 w-3" />
+              Revision
+            </button>
+          )}
 
           <button
             onClick={() => setOutlineOpen((v) => !v)}
             title="Outline"
             aria-label="Outline"
-            className="hover:bg-hover text-ink-faint hover:text-ink-muted grid h-6 w-6 place-items-center rounded"
+            className="notes-action"
           >
             <Icon name="list" className="h-3.5 w-3.5" />
           </button>
@@ -159,49 +190,40 @@ export function NotesPanel() {
             }}
             title="Document options"
             aria-label="Document options"
-            className="hover:bg-hover text-ink-faint hover:text-ink-muted grid h-6 w-6 place-items-center rounded"
+            className="notes-action"
           >
             <Icon name="dots" className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => setLayout(notesFocused ? 'three' : 'notes')}
-            title={notesFocused ? 'Return to study  Ctrl+3' : 'Focus notes  Ctrl+3'}
+            title={notesFocused ? 'Return to study  Ctrl+1' : 'Focus notes  Ctrl+4'}
             aria-label={notesFocused ? 'Return to study' : 'Focus notes'}
-            className="hover:bg-hover text-ink-faint hover:text-ink-muted grid h-6 w-6 place-items-center rounded"
+            className="notes-action"
           >
             <Icon name={notesFocused ? 'minimise' : 'maximise'} className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <h2 className="text-ink truncate px-2.5 pt-0.5 pb-1 text-[15px] font-semibold" dir="auto">
-          {active?.title ?? 'No note yet'}
-        </h2>
-
-        {/* §25 — tabs across the book's note documents. */}
-        <div className="scrollbar-none flex items-center gap-0.5 overflow-x-auto px-1.5 pb-1">
-          {noteList.map((note) => (
-            <button
-              key={note.id}
-              onClick={() => setActiveNote(note.id)}
-              className={`max-w-[11rem] shrink-0 truncate rounded px-2 py-1 text-[11.5px] transition-colors ${
-                note.id === activeNoteId
-                  ? 'bg-hover text-ink'
-                  : 'text-ink-faint hover:text-ink-muted hover:bg-hover/60'
-              }`}
-              dir="auto"
-            >
-              {note.title}
-            </button>
-          ))}
-          <button
-            onClick={createNote}
-            title="New note"
-            aria-label="New note"
-            className="hover:bg-hover text-ink-faint hover:text-ink-muted grid h-6 w-6 shrink-0 place-items-center rounded"
-          >
-            <Icon name="plus" className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        {/**
+         * §25 — tabs across the book's note documents. A chapter usually has
+         * exactly one, and a tab strip holding a single tab is chrome that
+         * says nothing, so it only appears once there is a choice to make.
+         */}
+        {noteList.length > 1 && !revisionMode && (
+          <div className="notes-tabs scrollbar-none">
+            {noteList.map((note) => (
+              <button
+                key={note.id}
+                ref={note.id === activeNoteId ? activeTabRef : undefined}
+                onClick={() => setActiveNote(note.id)}
+                className={`notes-tab ${note.id === activeNoteId ? 'is-active' : ''}`}
+                dir="auto"
+              >
+                {note.title}
+              </button>
+            ))}
+          </div>
+        )}
 
         {outlineOpen && (
           <OutlinePopover
@@ -212,10 +234,7 @@ export function NotesPanel() {
         )}
 
         {menuOpen && (
-          <div
-            className="border-line bg-elevated absolute end-2 top-10 z-40 w-52 rounded-md border p-1 shadow-xl"
-            onPointerDown={(e) => e.stopPropagation()}
-          >
+          <div className="notes-menu" onPointerDown={(e) => e.stopPropagation()}>
             <MenuItem
               label="Collapse all toggles"
               onClick={() => {
@@ -238,7 +257,16 @@ export function NotesPanel() {
                 setMenuOpen(false)
               }}
             />
-            <div className="bg-line my-1 h-px" />
+            <div className="block-menu-sep" />
+            {bookId && (
+              <MenuItem
+                label="New note"
+                onClick={() => {
+                  setMenuOpen(false)
+                  void createNote()
+                }}
+              />
+            )}
             <MenuItem
               label="Rename note"
               onClick={async () => {
@@ -286,27 +314,23 @@ export function NotesPanel() {
           onStats={onStats}
         />
       ) : (
-        <div className="grid flex-1 place-items-center px-6 text-center">
-          <div>
-            <p className="text-ink-muted text-sm">Nothing written about this book yet.</p>
-            <p className="text-ink-faint mt-2 text-xs">
-              Select a passage and press Ctrl+E, or start a blank note.
-            </p>
-            <button
-              onClick={createNote}
-              className="border-line hover:bg-hover text-ink-muted mt-4 rounded border px-3 py-1.5 text-xs"
-            >
-              New note
-            </button>
-          </div>
+        <div className="empty-state flex-1">
+          <p className="empty-state-line">Nothing written about this book yet.</p>
+          <p className="empty-state-hint">
+            Select a passage in the book and press Ctrl+E, or start a blank note.
+          </p>
+          <button onClick={createNote} className="empty-state-action">
+            New note
+          </button>
         </div>
       )}
 
       {/* ── Status strip ───────────────────────────────────────────────── */}
-      <footer className="border-line bg-panel text-ink-faint flex h-6 shrink-0 items-center gap-3 border-t px-3 text-[10.5px]">
-        <span className="min-w-12">{saving ? 'Saving…' : savedLabel ? 'Saved ✓' : ''}</span>
-        <span className="ms-auto tabular-nums">{words} words</span>
-        <span className="tabular-nums">p. {currentPage}</span>
+      {/* The page number lives in the reader and in the status bar already;
+          repeating it here was the third copy on one screen. */}
+      <footer className="notes-status">
+        <span>{saving ? 'Saving…' : savedLabel ? 'Saved' : ''}</span>
+        <span className="ms-auto tabular-nums">{words ? `${words} words` : ''}</span>
       </footer>
 
       <OutlineSync editorRef={editorRef} open={outlineOpen} onOutline={setOutline} />
@@ -326,14 +350,9 @@ function MenuItem({
   danger?: boolean
 }) {
   return (
-    <button
-      onClick={onClick}
-      className={`hover:bg-hover flex w-full items-center rounded px-2 py-1.5 text-start text-xs ${
-        danger ? 'text-ink-muted hover:text-hl-rose' : 'text-ink-muted'
-      }`}
-    >
+    <button onClick={onClick} className={`block-menu-item ${danger ? 'is-danger' : ''}`}>
       <span className="flex-1">{label}</span>
-      {trailing && <span className="text-ink-faint text-[10px]">{trailing}</span>}
+      {trailing && <span className="block-menu-hint">{trailing}</span>}
     </button>
   )
 }

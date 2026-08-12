@@ -18,9 +18,25 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
   const openNode = useLibraryStore((s) => s.openNode)
   const recent = useLiveQuery(() => libraryRepo.recent(5), [], [])
   const favourites = useLiveQuery(() => libraryRepo.favourites(), [], [])
+  const allNodes = useLiveQuery(() => libraryRepo.all(), [], [])
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
 
   const continueWith = recent[0]
+
+  /**
+   * "Chapter 3" on its own tells you nothing on the way back into the app, so
+   * everything outside the tree carries the book it belongs to (§F5).
+   */
+  const byId = new Map(allNodes.map((n) => [n.id, n]))
+  const trail = (node: LibraryNode): string[] => {
+    const out: string[] = []
+    let parent = node.parentId ? byId.get(node.parentId) : undefined
+    while (parent) {
+      out.unshift(parent.arabicTitle && !parent.title ? parent.arabicTitle : parent.title)
+      parent = parent.parentId ? byId.get(parent.parentId) : undefined
+    }
+    return out
+  }
 
   const addChild = async (parent: LibraryNode) => {
     const type: LibraryNodeType =
@@ -54,6 +70,9 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
             <h2 className="library-section-title">Continue studying</h2>
             <button className="library-continue" onClick={() => void openNode(continueWith.id)}>
               <div className="min-w-0">
+                {trail(continueWith).length > 0 && (
+                  <p className="library-continue-path">{trail(continueWith).join(' · ')}</p>
+                )}
                 <NodeTitle node={continueWith} className="library-continue-title" />
                 <p className="library-continue-meta">
                   {relativeTime(continueWith.lastOpenedAt)}
@@ -74,8 +93,9 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
               {favourites.map((node) => (
                 <li key={node.id}>
                   <button className="library-chip" onClick={() => void openNode(node.id)}>
-                    <Icon name="star" className="h-3 w-3" />
-                    <NodeTitle node={node} />
+                    <Icon name="star" className="lib-icon lib-star" />
+                    <NodeTitle node={node} className="library-chip-title" />
+                    <ChipParent trail={trail(node)} />
                   </button>
                 </li>
               ))}
@@ -90,7 +110,8 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
               {recent.slice(1).map((node) => (
                 <li key={node.id}>
                   <button className="library-chip" onClick={() => void openNode(node.id)}>
-                    <NodeTitle node={node} />
+                    <NodeTitle node={node} className="library-chip-title" />
+                    <ChipParent trail={trail(node)} />
                   </button>
                 </li>
               ))}
@@ -100,6 +121,17 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
 
         <section className="library-section">
           <h2 className="library-section-title">Library</h2>
+          {allNodes.length === 0 && (
+            <div className="empty-state">
+              <p className="empty-state-line">Your library is empty.</p>
+              <p className="empty-state-hint">
+                Import a book to begin, then add the chapters you are studying underneath it.
+              </p>
+              <button onClick={onImport} className="empty-state-action">
+                Import a PDF
+              </button>
+            </div>
+          )}
           <LibraryTree
             variant="home"
             onAdd={(node) => void addChild(node)}
@@ -110,6 +142,17 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
 
       {menu && <NodeMenu {...menu} onClose={() => setMenu(null)} />}
     </div>
+  )
+}
+
+/** The book a favourite or recent item sits in, kept to the right and quiet. */
+function ChipParent({ trail }: { trail: string[] }) {
+  const parent = trail.at(-1)
+  if (!parent) return null
+  return (
+    <span className="library-chip-parent" dir="auto">
+      {parent}
+    </span>
   )
 }
 
@@ -165,7 +208,7 @@ function NodeMenu({
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => e.preventDefault()} />
       <div className="node-menu" style={{ left: Math.min(x, window.innerWidth - 220), top: y }}>
         <button className="block-menu-item" onClick={rename}>
-          <span className="block-menu-icon">✎</span>
+          <Icon name="pencil" className="block-menu-icon" />
           <span className="flex-1">Rename</span>
         </button>
         <button className="block-menu-item" onClick={renameArabic}>
@@ -179,7 +222,7 @@ function NodeMenu({
             onClose()
           }}
         >
-          <span className="block-menu-icon">★</span>
+          <Icon name="star" className="block-menu-icon" />
           <span className="flex-1">{node.favorite ? 'Remove favourite' : 'Favourite'}</span>
         </button>
         {isContainer && (
@@ -195,7 +238,7 @@ function NodeMenu({
               onClose()
             }}
           >
-            <span className="block-menu-icon">＋</span>
+            <Icon name="plus" className="block-menu-icon" />
             <span className="flex-1">{node.type === 'book' || node.type === 'course' ? 'New chapter' : 'New book'}</span>
           </button>
         )}
@@ -210,12 +253,12 @@ function NodeMenu({
             onClose()
           }}
         >
-          <span className="block-menu-icon">▪</span>
+          <Icon name="note" className="block-menu-icon" />
           <span className="flex-1">New notes item</span>
         </button>
         <div className="block-menu-sep" />
         <button className="block-menu-item is-danger" onClick={remove}>
-          <span className="block-menu-icon">🗑</span>
+          <Icon name="trash" className="block-menu-icon" />
           <span className="flex-1">Delete</span>
         </button>
       </div>

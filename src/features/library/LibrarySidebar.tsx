@@ -99,7 +99,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
                 setMenu(null)
               }}
             >
-              <span className="block-menu-icon">✎</span>
+              <Icon name="pencil" className="block-menu-icon" />
               <span className="flex-1">Rename</span>
             </button>
             <button
@@ -109,7 +109,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
                 setMenu(null)
               }}
             >
-              <span className="block-menu-icon">★</span>
+              <Icon name="star" className="block-menu-icon" />
               <span className="flex-1">{menu.node.favorite ? 'Remove favourite' : 'Favourite'}</span>
             </button>
             <div className="block-menu-sep" />
@@ -125,7 +125,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
                 setMenu(null)
               }}
             >
-              <span className="block-menu-icon">🗑</span>
+              <Icon name="trash" className="block-menu-icon" />
               <span className="flex-1">Delete</span>
             </button>
           </div>

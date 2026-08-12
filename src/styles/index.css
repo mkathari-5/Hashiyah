@@ -38,10 +38,27 @@
   --color-hl-violet: #7f6aa8;
   --color-hl-neutral: #8d867b;
 
+  /* §F14 — the three voices. These colour *quoted speech itself*, never the
+     narrator, the reference or the explanation around it, so they are darker
+     and more readable than the highlight palette above: they are ink, not
+     marker. Revelation, prophetic speech and the speech of the salaf. */
+  --color-quran: #9c2b26;
+  --color-hadith: #1f6544;
+  --color-athar: #26527c;
+
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
   --font-arabic: 'Amiri', 'Traditional Arabic', 'Segoe UI', serif;
 
   --radius-panel: 0.375rem;
+}
+
+/* One shadow for everything that floats, so a slash menu and a context menu
+   never look like they came from different applications (§F18). */
+:root {
+  --radius-popover: 6px;
+  --shadow-popover:
+    0 2px 6px rgb(0 0 0 / 0.06),
+    0 10px 30px rgb(0 0 0 / 0.12);
 }
 
 :root.dark {
@@ -63,6 +80,16 @@
   --color-hl-rose: #cc7674;
   --color-hl-violet: #9a83c4;
   --color-hl-neutral: #8d867b;
+
+  /* Lifted well clear of the dark canvas: the same three voices have to stay
+     legible at 1.4em Arabic without turning fluorescent. */
+  --color-quran: #e0918a;
+  --color-hadith: #7cc5a0;
+  --color-athar: #8fb9e2;
+
+  --shadow-popover:
+    0 2px 6px rgb(0 0 0 / 0.4),
+    0 14px 38px rgb(0 0 0 / 0.5);
 }
 
 @layer base {
@@ -100,6 +127,16 @@
     font-size: 1.24em;
     line-height: 2.05;
     letter-spacing: 0;
+  }
+
+  /* The bump is optical, not cumulative. An Arabic run inside an Arabic block
+     is already the right size; applying the factor again would set a nested
+     `<bdi>` half as large again as the line it sits in. */
+  [dir='rtl'] [dir='rtl'],
+  [dir='rtl'] .font-arabic,
+  .font-arabic [dir='rtl'],
+  .font-arabic .font-arabic {
+    font-size: 1em;
   }
 
   ::-webkit-scrollbar {
@@ -250,8 +287,23 @@
    rhythm, one clear heading hierarchy, restrained colour, and a measure that
    stays readable however wide the panel gets.
    ─────────────────────────────────────────────────────────────────────────── */
+/**
+ * §F9 — the measure depends on how the note is being read.
+ *
+ * Beside a book the panel *is* the measure: forcing a centred column inside an
+ * already narrow panel spends the same width twice and leaves the manuscript
+ * looking squeezed. Alone on a wide display the opposite is true, so focus mode
+ * centres a real page instead of letting lines run to the window edge.
+ */
 .note-surface {
-  --note-measure: 46rem;
+  --note-measure: none;
+  padding-inline: clamp(1.35rem, 4%, 2.25rem);
+  padding-block: 1.1rem 0;
+}
+
+.note-surface[data-note-focus='true'] {
+  --note-measure: 52rem; /* ≈ 830px of text on a large display */
+  padding-inline: 2rem;
 }
 
 .ProseMirror {
@@ -262,18 +314,23 @@
   color: var(--color-ink);
 }
 
-/* §36 — never let a line run the full width of a maximised panel. */
 .ProseMirror > * {
   max-width: var(--note-measure);
   margin-inline: auto;
 }
 
 .ProseMirror > * + * {
-  margin-top: 0.55em;
+  margin-top: 0.6em;
 }
 
 .ProseMirror p {
-  line-height: 1.7;
+  line-height: 1.72;
+}
+
+/* Arabic prose is set larger and needs the extra room between paragraphs to
+   match, or the page reads tighter in Arabic than it does in English. */
+.ProseMirror > p[dir='rtl'] + p[dir='rtl'] {
+  margin-top: 0.75em;
 }
 
 .ProseMirror h1,
@@ -435,6 +492,16 @@
 .ProseMirror ul[data-type='taskList'] li > label {
   margin-top: 0.28em;
 }
+/* The system blue on a checked box is the one piece of another product's
+   palette that reaches into the manuscript (§F3). */
+.ProseMirror ul[data-type='taskList'] input[type='checkbox'] {
+  accent-color: var(--color-accent);
+  width: 0.85em;
+  height: 0.85em;
+}
+.ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
+  color: var(--color-ink-faint);
+}
 
 /* Placeholder on the currently focused empty block only — a page full of grey
    prompts is noise. */
@@ -455,10 +522,37 @@
    child block, including nested toggles — rather than any single paragraph.
    ─────────────────────────────────────────────────────────────────────────── */
 .ProseMirror .toggle {
+  position: relative;
   display: grid;
   grid-template-columns: 1.25rem minmax(0, 1fr);
   align-items: start;
-  margin-block: 0.35em;
+  margin-block: 0.45em;
+}
+
+/**
+ * A guide down the arrow gutter of an open section, so a nested toggle reads
+ * as *inside* its parent rather than merely after it. Only on hover: a page of
+ * permanent vertical rules is exactly the "stack of database blocks" look the
+ * manuscript is meant to avoid.
+ */
+.ProseMirror .toggle[data-open='true']::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0.52rem;
+  top: 1.65em;
+  bottom: 0.15em;
+  width: 1px;
+  background: color-mix(in srgb, var(--color-line-strong) 60%, transparent);
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+.ProseMirror .toggle[data-open='true']:hover::before {
+  opacity: 1;
+}
+.ProseMirror .toggle[data-dir='rtl'][data-open='true']::before {
+  inset-inline-start: auto;
+  inset-inline-end: 0.52rem;
 }
 
 .toggle-arrow {
@@ -469,12 +563,17 @@
   height: 1.5rem;
   margin-top: 0.05em;
   border-radius: 3px;
-  color: var(--color-ink-faint);
+  /* Faint at rest so a page of questions reads as prose, but a clear target
+     the moment the reader goes for it (§F11). */
+  color: color-mix(in srgb, var(--color-ink-faint) 80%, transparent);
   cursor: pointer;
   user-select: none;
   transition:
     background-color 120ms ease,
     color 120ms ease;
+}
+.ProseMirror .toggle:hover > .toggle-arrow {
+  color: var(--color-ink-faint);
 }
 .toggle-arrow:hover {
   background: var(--color-hover);
@@ -586,27 +685,25 @@
   user-select: none;
 }
 
-.ProseMirror [data-kind='quran'],
+/* §F13 — four families, not fifteen colours: what you gained, what proves it,
+   what to watch out for, and who said it. */
 .ProseMirror [data-kind='benefit'] {
   --semantic-color: var(--color-hl-green);
 }
-.ProseMirror [data-kind='hadith'],
-.ProseMirror [data-kind='athar'],
-.ProseMirror [data-kind='definition'] {
+.ProseMirror [data-kind='evidence'],
+.ProseMirror [data-kind='definition'],
+.ProseMirror [data-kind='athar'] {
   --semantic-color: var(--color-hl-blue);
-}
-.ProseMirror [data-kind='teacher'] {
-  --semantic-color: var(--color-hl-amber);
 }
 .ProseMirror [data-kind='important'],
 .ProseMirror [data-kind='warning'],
 .ProseMirror [data-kind='question'] {
   --semantic-color: var(--color-hl-rose);
 }
+.ProseMirror [data-kind='teacher'],
 .ProseMirror [data-kind='scholar'],
-.ProseMirror [data-kind='qaidah'],
-.ProseMirror [data-kind='evidence'] {
-  --semantic-color: var(--color-hl-violet);
+.ProseMirror [data-kind='qaidah'] {
+  --semantic-color: var(--color-accent);
 }
 
 /* Toggle bodies collapse with the native <details> element. */
@@ -677,42 +774,48 @@
 }
 
 .source-quote {
-  margin-block: 0.2em 0.55em;
+  margin-block: 0.25em 0.6em;
 }
 
+/**
+ * §F15 — provenance, not a card.
+ *
+ * A passage taken out of the book is a quotation in the margin: one thin rule,
+ * the text as the reader will actually read it, and a quiet line saying where
+ * it came from. A bordered, filled panel around every extract turns a page of
+ * study notes into a page of database records.
+ */
 .source-quote-body {
   position: relative;
-  border: 1px solid var(--color-line);
-  border-inline-start: 2px solid var(--quote-accent, var(--color-hl-amber));
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--color-panel) 65%, transparent);
-  padding: 0.5em 0.8em 0.55em;
-  transition: border-color 140ms ease;
+  border-inline-start: 2px solid
+    color-mix(in srgb, var(--quote-accent, var(--color-line-strong)) 55%, transparent);
+  padding-inline-start: 0.9em;
+  padding-block: 0.05em 0.1em;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+/* Inside a source group the group's own rule already says "this belongs
+   together"; a second parallel line beside it is just noise. */
+.ProseMirror [data-source-group] .source-quote-body {
+  border-inline-start: none;
+  padding-inline-start: 0;
 }
 
 .source-quote-body.is-active {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
-  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-panel));
+  border-inline-start-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
-
-.source-quote-label {
-  display: flex;
-  align-items: center;
-  gap: 0.3em;
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--color-ink-faint);
-  margin-bottom: 0.3em;
-  user-select: none;
+.ProseMirror [data-source-group] .source-quote-body.is-active {
+  box-shadow: -0.55em 0 0 color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .source-quote-text {
   white-space: pre-wrap;
   color: var(--color-ink);
   font-size: 13.5px;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 .source-quote-text.font-arabic {
   font-size: 1.3em;
@@ -723,14 +826,23 @@
   display: flex;
   align-items: center;
   gap: 0.3em;
-  margin-top: 0.45em;
-  font-size: 11px;
+  margin-top: 0.3em;
+  font-size: 10.5px;
   color: var(--color-ink-faint);
   transition: color 120ms ease;
   max-width: 100%;
 }
+/* An Arabic passage ends on the left, so its reference belongs on the right.
+   The width has to be stated for the auto margin to have anything to push. */
+.source-quote-link.is-rtl {
+  width: fit-content;
+  margin-inline-start: auto;
+}
 .source-quote-link:hover {
   color: var(--color-accent);
+}
+.source-quote-link .source-quote-mark {
+  color: color-mix(in srgb, var(--quote-accent, var(--color-ink-faint)) 80%, transparent);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -744,6 +856,15 @@
   padding-inline: 1.1em 0.4em;
 }
 
+/* §F14 — the rule, the label and the text itself all speak with one voice:
+   revelation is red, the Prophet ﷺ is green. */
+.scripture-quran {
+  --scripture-ink: var(--color-quran);
+}
+.scripture-hadith {
+  --scripture-ink: var(--color-hadith);
+}
+
 .scripture-rule {
   position: absolute;
   inset-inline-start: 0;
@@ -751,19 +872,14 @@
   bottom: 0;
   width: 2px;
   border-radius: 1px;
-}
-.scripture-quran .scripture-rule {
-  background: color-mix(in srgb, var(--color-hl-green) 70%, transparent);
-}
-.scripture-hadith .scripture-rule {
-  background: color-mix(in srgb, var(--color-hl-blue) 70%, transparent);
+  background: color-mix(in srgb, var(--scripture-ink) 55%, transparent);
 }
 
 .scripture-head {
   display: flex;
   align-items: baseline;
   gap: 0.6em;
-  margin-bottom: 0.3em;
+  margin-bottom: 0.25em;
   user-select: none;
 }
 .scripture-kind {
@@ -771,31 +887,37 @@
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  color: color-mix(in srgb, var(--scripture-ink) 85%, var(--color-ink-muted));
 }
-.scripture-quran .scripture-kind {
-  color: var(--color-hl-green);
-}
-.scripture-hadith .scripture-kind {
-  color: var(--color-hl-blue);
-}
+/* Introductory wording is not the quotation, so it stays in ordinary ink. */
 .scripture-intro {
   font-size: 1.05em;
   color: var(--color-ink-muted);
 }
 
+/**
+ * The quoted text — and only the quoted text — carries the colour. Sūrah
+ * numbers, narrators, gradings and the reader's own translation sit outside
+ * this element and stay muted, because they are apparatus rather than speech.
+ */
 .scripture-body {
-  font-size: 1.42em;
-  line-height: 2.15;
-  color: var(--color-ink);
+  font-size: 1.44em;
+  line-height: 2.2;
+  color: var(--scripture-ink, var(--color-ink));
   min-height: 2em;
+}
+
+/* The speech of the ṣaḥābah and the salaf, wherever it is written down. */
+.ProseMirror [data-kind='athar'] > * {
+  color: var(--color-athar);
 }
 
 .scripture-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4em;
-  margin-top: 0.45em;
+  gap: 0.15em;
+  margin-top: 0.4em;
 }
 
 .scripture-meta-input,
@@ -823,24 +945,38 @@
   color: var(--color-ink-faint);
 }
 
+/* The reader's own wording, set as apparatus under the āyah rather than as a
+   form field: no resize grip, no visible box until it is being used. */
 .scripture-translation {
   display: block;
   width: 100%;
-  margin-top: 0.4em;
-  resize: vertical;
-  line-height: 1.6;
+  margin-top: 0.35em;
+  resize: none;
+  field-sizing: content;
+  min-height: 2.6em;
+  line-height: 1.65;
   font-size: 12.5px;
 }
 
+/* A control, not a field: it belongs at the end of the apparatus line and
+   only needs to be findable, not visible from across the room. */
 .scripture-toggle {
-  font-size: 11px;
-  color: var(--color-ink-faint);
+  margin-inline-start: auto;
   padding: 0.15em 0.35em;
   border-radius: 3px;
+  font-size: 10.5px;
+  color: color-mix(in srgb, var(--color-ink-faint) 75%, transparent);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease;
+}
+.scripture:hover .scripture-toggle,
+.scripture-toggle:focus-visible {
+  opacity: 1;
 }
 .scripture-toggle:hover {
   color: var(--color-accent);
-  background: var(--color-hover);
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -1132,22 +1268,40 @@
   cursor: grabbing;
 }
 
+/**
+ * §F18 — one surface for everything that floats.
+ *
+ * A slash menu, a right-click menu on a chapter and the outline popover are
+ * the same object as far as the reader is concerned, so they share a border,
+ * a radius, a shadow and a padding rather than each drifting to whatever the
+ * component that introduced them happened to use.
+ */
+.block-menu,
+.node-menu,
+.slash-menu,
+.outline-pop,
+.format-bar {
+  padding: 0.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-popover);
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-popover);
+}
+
 .block-menu {
   position: absolute;
   z-index: 40;
   width: 15rem;
-  padding: 0.25rem;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-elevated);
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.1),
-    0 12px 32px rgb(0 0 0 / 0.12);
 }
-:root.dark .block-menu {
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.4),
-    0 14px 36px rgb(0 0 0 / 0.45);
+
+.format-bar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.1rem;
+  max-width: min(34rem, calc(100vw - 1rem));
 }
 
 .block-menu-item {
@@ -1170,10 +1324,15 @@
 .block-menu-icon {
   display: grid;
   place-items: center;
-  width: 1.1rem;
+  width: 1.05rem;
+  height: 1.05rem;
   font-size: 11.5px;
   color: var(--color-ink-faint);
   flex-shrink: 0;
+}
+/* The same slot whether it holds a glyph or one of the drawn icons. */
+svg.block-menu-icon {
+  padding: 0.5px;
 }
 .block-menu-swatch {
   width: 0.85rem;
@@ -1210,18 +1369,6 @@
   width: 17rem;
   max-height: 21rem;
   overflow-y: auto;
-  padding: 0.25rem;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-elevated);
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.1),
-    0 14px 36px rgb(0 0 0 / 0.14);
-}
-:root.dark .slash-menu {
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.4),
-    0 16px 40px rgb(0 0 0 / 0.5);
 }
 
 .slash-group {
@@ -1288,9 +1435,9 @@
   background: var(--color-canvas);
 }
 .library-home-inner {
-  max-width: 54rem;
+  max-width: 52rem;
   margin-inline: auto;
-  padding: 3rem 2rem 6rem;
+  padding: 2.75rem 2rem 6rem;
 }
 
 .library-masthead {
@@ -1298,8 +1445,8 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 1rem;
-  padding-bottom: 1.25rem;
-  margin-bottom: 1.75rem;
+  padding-bottom: 1.1rem;
+  margin-bottom: 1.6rem;
   border-bottom: 1px solid var(--color-line);
 }
 .library-eyebrow {
@@ -1311,10 +1458,10 @@
 }
 .library-title {
   font-family: var(--font-arabic);
-  font-size: 2.4rem;
-  line-height: 1.25;
+  font-size: 2.35rem;
+  line-height: 1.2;
   color: var(--color-ink);
-  margin-top: 0.15rem;
+  margin-top: 0.1rem;
 }
 .library-import {
   display: flex;
@@ -1332,7 +1479,7 @@
 }
 
 .library-section {
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.6rem;
 }
 .library-section-title {
   font-size: 10px;
@@ -1340,34 +1487,49 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--color-ink-faint);
-  margin-bottom: 0.55rem;
+  margin-bottom: 0.5rem;
 }
 
+/**
+ * §F5 — "Continue studying" is the strongest secondary element on the page,
+ * and it earns that by *typography*: the chapter is set at reading size with
+ * its book above it in small caps. A bordered, filled, rounded panel would
+ * make the entrance to a library look like a dashboard tile.
+ */
 .library-continue {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   width: 100%;
-  padding: 0.75rem 0.9rem;
-  border: 1px solid var(--color-line);
+  padding: 0.15rem 0.75rem 0.3rem;
   border-inline-start: 2px solid var(--color-accent);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--color-panel) 55%, transparent);
   text-align: start;
 }
-.library-continue:hover {
-  background: var(--color-hover);
+.library-continue:hover .library-continue-title {
+  color: var(--color-accent);
+}
+.library-continue-path {
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+  margin-bottom: 0.12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .library-continue-title {
-  font-size: 14.5px;
+  font-size: 16px;
   font-weight: 550;
+  line-height: 1.35;
   color: var(--color-ink);
+  transition: color 120ms ease;
 }
 .library-continue-meta {
   font-size: 11px;
   color: var(--color-ink-faint);
-  margin-top: 0.15rem;
+  margin-top: 0.2rem;
 }
 .library-continue-cta {
   display: flex;
@@ -1376,28 +1538,55 @@
   flex-shrink: 0;
   font-size: 12px;
   color: var(--color-accent);
+  opacity: 0.75;
+}
+.library-continue:hover .library-continue-cta {
+  opacity: 1;
 }
 
+/**
+ * Favourites and recents are a reading list, not a filter bar: pills with
+ * borders read as controls and compete with the library itself, so these are
+ * set as a quiet column of titles with the book shown beside them.
+ */
 .library-chips {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
+  flex-direction: column;
 }
 .library-chip {
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.28rem 0.6rem;
-  border: 1px solid var(--color-line);
-  border-radius: 999px;
-  font-size: 12px;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding: 0.22rem 0.4rem 0.22rem 0.35rem;
+  border-radius: 3px;
+  font-size: 12.5px;
   color: var(--color-ink-muted);
-  max-width: 22rem;
+  text-align: start;
+  min-width: 0;
 }
 .library-chip:hover {
   background: var(--color-hover);
   color: var(--color-ink);
-  border-color: var(--color-line-strong);
+}
+.library-chip .lib-icon {
+  align-self: center;
+}
+.library-chip-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.library-chip-parent {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  padding-inline-start: 0.75rem;
+  font-size: 11px;
+  color: var(--color-ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
 }
 
 /* ── Tree rows ───────────────────────────────────────────────────────────── */
@@ -1405,12 +1594,13 @@
   margin: 0;
 }
 .lib-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.1rem;
-  border-radius: 4px;
+  border-radius: 3px;
   padding-inline-end: 0.25rem;
-  min-height: 1.65rem;
+  min-height: 1.6rem;
 }
 .lib-tree-home .lib-row {
   min-height: 1.85rem;
@@ -1418,8 +1608,24 @@
 .lib-row:hover {
   background: var(--color-hover);
 }
+
+/**
+ * §F7 — the open chapter is marked, not filled. A bronze rule in the gutter
+ * plus darker ink says "you are here"; a soft wash would turn every click
+ * into a painted block across the sidebar.
+ */
 .lib-row.is-selected {
-  background: var(--color-accent-soft);
+  background: color-mix(in srgb, var(--color-accent-soft) 28%, transparent);
+}
+.lib-row.is-selected::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
 }
 .lib-row.is-drop {
   outline: 1px solid var(--color-accent);
@@ -1460,14 +1666,27 @@
   width: 0.85rem;
   height: 0.85rem;
   flex-shrink: 0;
-  color: var(--color-ink-faint);
+  color: color-mix(in srgb, var(--color-ink-faint) 70%, transparent);
 }
+
+/**
+ * §F5 — "use icons very subtly".
+ *
+ * A science and a book are worth marking; a column of identical page glyphs
+ * down every chapter is not, and indentation already says where they sit. A
+ * notes-only item keeps its mark, because that *is* the difference between it
+ * and the chapters around it.
+ */
+.lib-row-chapter > .lib-label > .lib-icon,
+.lib-row-lesson > .lib-label > .lib-icon {
+  display: none;
+}
+/* A mark on the title, not a column at the far edge of the panel. */
 .lib-star {
-  width: 0.7rem;
-  height: 0.7rem;
+  width: 0.65rem;
+  height: 0.65rem;
   flex-shrink: 0;
-  color: var(--color-accent);
-  margin-inline-start: auto;
+  color: color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 
 .lib-add {
@@ -1497,12 +1716,22 @@
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  text-overflow: ellipsis;
   font-size: 12.5px;
 }
+
+/**
+ * §F4 — "Chapter 3 — باب الخوف من الشرك".
+ *
+ * When the row is too narrow, the part that must survive is the identifier the
+ * reader navigates by, so the Latin half and the dash hold their size and the
+ * Arabic half takes the ellipsis. Each half is its own bdi, so the truncation
+ * never drags the dash to the wrong side of the title.
+ */
 .lib-title-latin {
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
 }
 .lib-title-sep {
   color: var(--color-ink-faint);
@@ -1510,11 +1739,13 @@
 }
 .lib-title-arabic {
   font-size: 1.15em;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lib-row-science > .lib-label .lib-title {
-  font-size: 13px;
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.005em;
@@ -1523,6 +1754,7 @@
 .lib-row-course > .lib-label .lib-title {
   font-size: 12.5px;
   font-weight: 550;
+  color: var(--color-ink);
 }
 .lib-row-chapter > .lib-label .lib-title,
 .lib-row-lesson > .lib-label .lib-title,
@@ -1531,9 +1763,32 @@
   font-weight: 400;
 }
 
+/* The library home is a reading room, not a file tree: the same hierarchy,
+   set two steps larger, with the sciences given room to breathe. */
+.lib-tree-home > li > .lib-row .lib-title {
+  font-size: 15px;
+}
+.lib-tree-home > li + li {
+  margin-top: 0.35rem;
+}
+.lib-tree-home .lib-row-book > .lib-label .lib-title,
+.lib-tree-home .lib-row-course > .lib-label .lib-title {
+  font-size: 13.5px;
+}
+.lib-tree-home .lib-row-chapter > .lib-label .lib-title,
+.lib-tree-home .lib-row-lesson > .lib-label .lib-title,
+.lib-tree-home .lib-row-notes > .lib-label .lib-title {
+  font-size: 13px;
+}
+
 /* ── Live chapter outline in the sidebar (§E29) ──────────────────────────── */
+/**
+ * §F7 — the live outline is *inside* the chapter, so it must never read as
+ * more library nodes: smaller, fainter, indented past the chapter's own title
+ * and marked with a tiny ▸ rather than a file icon.
+ */
 .lib-outline {
-  margin-bottom: 0.2rem;
+  margin-block: 0.05rem 0.3rem;
 }
 .lib-outline-head {
   display: flex;
@@ -1563,9 +1818,10 @@
   min-width: 0;
   padding-block: 0.14rem;
   padding-inline-end: 0.4rem;
-  border-radius: 4px;
-  font-size: 11.5px;
-  color: var(--color-ink-muted);
+  border-radius: 3px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-ink-muted) 85%, transparent);
   text-align: start;
   /* A questioning title is the point of the outline; keep it on one line so
      the list stays scannable. */
@@ -1577,7 +1833,8 @@
   color: var(--color-ink);
 }
 .lib-outline-item.is-heading {
-  font-weight: 600;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-ink-muted) 95%, transparent);
 }
 .lib-outline-mark {
   flex-shrink: 0;
@@ -1594,17 +1851,461 @@
   text-decoration: underline;
 }
 
-/* ── Revision mode (§E30) ────────────────────────────────────────────────── */
-.revision-bar {
+/* ── The application chrome (§F3, §F6) ───────────────────────────────────── */
+.status-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.75rem;
+  height: 1.5rem;
+  padding-inline: 0.75rem;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+
+.topbar-command {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  max-width: 22rem;
+  height: 1.65rem;
+  margin-inline: auto;
+  padding-inline: 0.55rem;
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.topbar-command:hover {
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
+}
+
+.topbar-layouts {
+  display: flex;
+  align-items: center;
+  gap: 0.05rem;
+  margin-inline-end: 0.3rem;
+  padding-inline-end: 0.4rem;
+  border-inline-end: 1px solid var(--color-line);
+}
+.topbar-layout {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.topbar-layout:hover {
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
+}
+.topbar-layout.is-active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Search (§F17)
+
+   A command surface, not a form: one field, results grouped by where they
+   live, and every hit reading as "path → the line that matched".
+   ─────────────────────────────────────────────────────────────────────────── */
+.search-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 1.5rem;
+  padding-top: 9vh;
+  background: rgb(0 0 0 / 0.28);
+}
+:root.dark .search-scrim {
+  background: rgb(0 0 0 / 0.45);
+}
+
+.search-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 40rem;
+  max-height: 72vh;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-popover);
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-line);
+}
+.search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+.search-input::placeholder {
+  color: var(--color-ink-faint);
+}
+.search-scope {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.1rem;
+  font-size: 10.5px;
+}
+.search-scope-button {
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+}
+.search-scope-button:hover:not(:disabled) {
+  color: var(--color-ink-muted);
+}
+.search-scope-button.is-active {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+.search-scope-button:disabled {
+  opacity: 0.4;
+}
+
+.search-results {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0.35rem 0.5rem;
+}
+.search-group + .search-group {
+  margin-top: 0.35rem;
+}
+.search-group-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.5rem 0.25rem;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+.search-count {
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--color-ink-faint) 75%, transparent);
+}
+
+.search-hit {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem 0.35rem;
+  border-radius: 4px;
+  text-align: start;
+}
+.search-hit:hover,
+.search-hit:focus-visible {
+  background: var(--color-hover);
+}
+.search-hit-path {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.3rem 0.7rem;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+/**
+ * The matched line hangs under its path with a small marker, so a result
+ * always reads "where it lives → what it said" even when the two run in
+ * opposite directions.
+ */
+.search-hit-text {
+  position: relative;
+  margin-top: 0.1rem;
+  padding-inline-start: 0.75rem;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--color-ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.search-hit-text::before {
+  content: '';
+  position: absolute;
+  inset-inline-start: 0.1rem;
+  top: 0.45em;
+  width: 4px;
+  height: 1px;
+  background: var(--color-line-strong);
+}
+.search-hit-text.font-arabic {
+  font-size: 1.15em;
+  line-height: 2;
+}
+
+/* The browser's default <mark> is a block of pure yellow; this has to sit
+   under Arabic text in both themes without shouting (§F17, §F20). */
+.search-hit-text mark {
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
+  color: inherit;
+  border-radius: 2px;
+  padding-inline: 0.1em;
+  box-decoration-break: clone;
+}
+:root.dark .search-hit-text mark {
+  background: color-mix(in srgb, var(--color-accent) 34%, transparent);
+}
+
+.search-note {
+  padding: 1.25rem 1rem;
+  text-align: center;
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--color-ink-faint);
+}
+
+/**
+ * ── Empty states (§F19) ───────────────────────────────────────────────────
+ *
+ * A line saying what is missing and, at most, one thing to do about it. No
+ * illustrations: an empty chapter is a normal moment in study, not an error.
+ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 100%;
+  padding: 1.5rem;
+  text-align: center;
+}
+.library-section > .empty-state {
+  min-height: 0;
+  align-items: flex-start;
+  padding: 0.6rem 0 0.2rem;
+  text-align: start;
+}
+.empty-state-line {
+  font-size: 12.5px;
+  color: var(--color-ink-muted);
+}
+.empty-state-hint {
+  max-width: 24rem;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-ink-faint);
+}
+.empty-state-action {
+  margin-top: 0.6rem;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  font-size: 11.5px;
+  color: var(--color-ink-muted);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+}
+.empty-state-action:hover {
+  border-color: var(--color-line-strong);
+  color: var(--color-ink);
+}
+
+/* ───────────────────────────────────────────────────────────────────────────
+   The notes header (§F10)
+
+   Three quiet lines at most: where you are, what you are reading, and — only
+   when there is a choice — which document. The controls live on the title's
+   line and recede, so the panel opens with one clear identity rather than a
+   row of equally loud buttons.
+   ─────────────────────────────────────────────────────────────────────────── */
+.notes-header {
+  position: relative;
+  flex-shrink: 0;
+  padding: 0.4rem 0.65rem 0.35rem;
   border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
+
+.notes-crumb {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+.notes-crumb button {
+  min-width: 0;
+  transition: color 120ms ease;
+}
+.notes-crumb button:hover {
+  color: var(--color-ink-muted);
+}
+
+.notes-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
+  margin-top: 0.05rem;
+}
+.notes-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--color-ink);
+  /* §F25 — this is the library's name for the chapter, not a heading pulled
+     out of the document. */
+}
+.notes-title .notes-title-parts {
+  display: inline-flex;
+  max-width: 100%;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.notes-action {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  height: 1.5rem;
+  min-width: 1.5rem;
+  border-radius: 4px;
+  color: var(--color-ink-faint);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.notes-action.is-labelled {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding-inline: 0.4rem;
+  font-size: 11px;
+}
+.notes-action:hover {
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
+}
+
+.notes-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  margin-top: 0.25rem;
+  overflow-x: auto;
+}
+.notes-tab {
+  flex-shrink: 0;
+  max-width: 11rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
+  transition:
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+.notes-tab:hover {
+  color: var(--color-ink-muted);
+}
+/* Underlined rather than filled: a tab strip of grey pills competes with the
+   title directly above it. */
+.notes-tab.is-active {
+  color: var(--color-ink);
+  box-shadow: inset 0 -1.5px 0 var(--color-accent);
+}
+
+/* Focus mode: the header sits over the same measure as the manuscript, so the
+   title is above the text it names rather than off at the window edge. */
+.notes-header.is-focused > :not(.notes-menu):not(.outline-pop) {
+  max-width: 52rem;
+  margin-inline: auto;
+}
+
+.notes-status {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.75rem;
+  height: 1.4rem;
+  padding-inline: 0.75rem;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-panel);
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+
+.notes-menu {
+  position: absolute;
+  inset-inline-end: 0.5rem;
+  top: 2.5rem;
+  z-index: 40;
+  width: 13rem;
+  padding: 0.25rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-popover);
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.block-menu-hint {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--color-ink-faint);
+}
+
+/**
+ * ── Revision mode (§E30, §F12) ────────────────────────────────────────────
+ *
+ * One small contextual bar, not a mode banner: it says which state you are in
+ * and offers the three things you actually do while revising. No score, no
+ * progress, no cards — mentally answering the question and then opening the
+ * toggle *is* the workflow.
+ */
+.revision-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.25rem 0.7rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 25%, var(--color-line));
   background: color-mix(in srgb, var(--color-accent) 7%, var(--color-panel));
   font-size: 11px;
 }
 .revision-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
@@ -1612,26 +2313,41 @@
   color: var(--color-accent);
   margin-inline-end: auto;
 }
+.revision-label::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
 .revision-bar button {
-  padding: 0.15rem 0.45rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 4px;
   color: var(--color-ink-muted);
 }
 .revision-bar button:hover {
-  background: var(--color-hover);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   color: var(--color-ink);
 }
 .revision-bar .revision-exit {
   color: var(--color-accent);
+  font-weight: 550;
 }
 
-/* Reading, not editing: the questions carry the page and the surrounding
-   apparatus recedes. Nothing is disabled — you can still open and write. */
+/**
+ * Reading, not editing: the questions carry the page and the surrounding
+ * apparatus recedes. Nothing is disabled — you can still open and write.
+ */
 .note-surface.is-revising .ProseMirror .toggle {
-  margin-block: 0.15rem;
+  margin-block: 0.1rem;
 }
 .note-surface.is-revising .ProseMirror .toggle[data-open='false'] [data-toggle-summary] {
-  padding-block: 0.3em;
+  padding-block: 0.35em;
+}
+/* Collapsed questions read as a list to work through, so they get a hairline
+   between them instead of floating in space. */
+.note-surface.is-revising .ProseMirror .toggle[data-open='false'] + .toggle[data-open='false'] {
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
 }
 
 /* Pulse when navigating to a block from the outline or a search result. */
@@ -1661,18 +2377,81 @@
   position: fixed;
   z-index: 50;
   width: 13rem;
-  padding: 0.25rem;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-elevated);
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.12),
-    0 14px 36px rgb(0 0 0 / 0.16);
 }
-:root.dark .node-menu {
-  box-shadow:
-    0 4px 12px rgb(0 0 0 / 0.45),
-    0 16px 40px rgb(0 0 0 / 0.5);
+
+.outline-pop {
+  position: absolute;
+  inset-inline-end: 0.5rem;
+  top: 2.5rem;
+  z-index: 40;
+  width: 16rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+.outline-pop-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  width: 100%;
+  padding-block: 0.2rem;
+  padding-inline-end: 0.5rem;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--color-ink-muted);
+  text-align: start;
+}
+.outline-pop-item.is-heading {
+  font-weight: 550;
+  color: var(--color-ink);
+}
+.outline-pop-item:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.outline-pop-empty {
+  padding: 0.55rem 0.6rem 0.7rem;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--color-ink-faint);
+}
+
+/**
+ * §F21 — desktop widths vary. Keep the library readable and the search panel
+ * from overflowing; do not invent a separate mobile product.
+ */
+@media (max-width: 1100px) {
+  .library-home-inner {
+    padding: 1.75rem 1.25rem 4rem;
+  }
+  .library-title {
+    font-size: 2rem;
+  }
+  .search-panel {
+    max-width: min(40rem, calc(100vw - 1.5rem));
+  }
+  .search-scrim {
+    padding: 1rem;
+    padding-top: 6vh;
+  }
+  .notes-title {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 860px) {
+  .library-masthead {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .library-continue-cta {
+    display: none;
+  }
+  .library-chip-parent {
+    display: none;
+  }
+  .topbar-layouts {
+    display: none;
+  }
 }
 
 @layer utilities {

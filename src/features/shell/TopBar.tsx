@@ -26,17 +26,16 @@ export function TopBar({ onImport }: { onImport: () => void }) {
         <span className="text-ink text-[13px] font-semibold tracking-tight">Ḥāshiyah</span>
       </div>
 
-      <button
-        onClick={() => setPaletteOpen(true)}
-        className="border-line bg-elevated hover:border-line-strong text-ink-faint mx-auto flex h-7 w-full max-w-sm items-center gap-2 rounded border px-2.5 text-xs transition-colors"
-      >
+      {/* A quiet line of text until you reach for it, rather than a filled
+          input box sitting in the middle of the chrome (§F3). */}
+      <button onClick={() => setPaletteOpen(true)} className="topbar-command">
         <Icon name="search" className="h-3.5 w-3.5" />
         <span>Search or run a command</span>
         <span className="ms-auto tabular-nums opacity-70">Ctrl K</span>
       </button>
 
       <div className="flex shrink-0 items-center gap-0.5">
-        <div className="border-line bg-elevated me-1 flex items-center rounded border p-0.5">
+        <div className="topbar-layouts">
           {LAYOUTS.map((entry) => (
             <button
               key={entry.mode}
@@ -44,11 +43,7 @@ export function TopBar({ onImport }: { onImport: () => void }) {
               title={entry.label}
               aria-label={entry.label}
               aria-pressed={layout === entry.mode}
-              className={`grid h-6 w-6 place-items-center rounded-[3px] transition-colors ${
-                layout === entry.mode
-                  ? 'bg-hover text-accent'
-                  : 'text-ink-faint hover:text-ink-muted hover:bg-hover'
-              }`}
+              className={`topbar-layout ${layout === entry.mode ? 'is-active' : ''}`}
             >
               <Icon name={entry.icon} className="h-3.5 w-3.5" />
             </button>

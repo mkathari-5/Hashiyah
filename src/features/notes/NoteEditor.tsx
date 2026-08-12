@@ -117,6 +117,10 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const markSaving = useAppStore((s) => s.markSaving)
   const markSaved = useAppStore((s) => s.markSaved)
   const isLesson = useAppStore((s) => s.layout === 'lesson')
+  // §F9 — beside a PDF the manuscript takes the panel; on its own it is
+  // centred at a reading measure instead of running the full width of a
+  // large display.
+  const isFocused = useAppStore((s) => s.layout === 'notes' || s.layout === 'lesson')
   const pendingInsert = useNotesStore((s) => s.pendingInsert)
   const clearInsert = useNotesStore((s) => s.clearInsert)
   const pendingScroll = useNotesStore((s) => s.pendingScroll)
@@ -408,7 +412,8 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
 
       <div
         ref={scrollRef}
-        className={`note-surface relative min-h-0 flex-1 overflow-y-auto px-8 py-5 ${
+        data-note-focus={isFocused ? 'true' : 'false'}
+        className={`note-surface relative min-h-0 flex-1 overflow-y-auto ${
           revisionMode ? 'is-revising' : ''
         }`}
       >

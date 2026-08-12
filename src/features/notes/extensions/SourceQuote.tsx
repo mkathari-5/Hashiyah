@@ -195,17 +195,23 @@ function SourceQuoteView({ node, selected }: NodeViewProps) {
 
   if (!data) {
     return (
-      <NodeViewWrapper className="my-2">
-        <div className="border-line bg-panel h-16 animate-pulse rounded border" />
+      <NodeViewWrapper className="source-quote">
+        {/* A quiet placeholder the same shape as the quotation, so the page
+            does not jump when the passage arrives. */}
+        <div className="source-quote-body opacity-40">
+          <p className="source-quote-text">…</p>
+        </div>
       </NodeViewWrapper>
     )
   }
 
   if (data.missing) {
     return (
-      <NodeViewWrapper className="my-2">
-        <div className="border-line text-ink-faint rounded border border-dashed px-3 py-2 text-xs">
-          The passage this quotation pointed to has been deleted. The note is unaffected.
+      <NodeViewWrapper className="source-quote">
+        <div className="source-quote-body">
+          <p className="text-ink-faint text-xs italic">
+            The passage this quotation pointed to has been deleted. The note is unaffected.
+          </p>
         </div>
       </NodeViewWrapper>
     )
@@ -222,11 +228,9 @@ function SourceQuoteView({ node, selected }: NodeViewProps) {
         className={`source-quote-body ${selected || highlighted ? 'is-active' : ''}`}
         style={{ ['--quote-accent' as string]: `var(--color-hl-${annotation.color})` }}
       >
-        <div className="source-quote-label" contentEditable={false}>
-          <Icon name="quote" className="h-3 w-3" />
-          <span>Source</span>
-        </div>
-
+        {/* No "SOURCE" label: the rule in the margin and the reference beneath
+            already say what this is, and repeating it on every extract is what
+            turns a page of notes into a page of records (§F15). */}
         {isEmpty ? (
           <p className="text-ink-faint text-xs italic">Reading position on page {pageNumber}</p>
         ) : (
@@ -239,9 +243,12 @@ function SourceQuoteView({ node, selected }: NodeViewProps) {
           type="button"
           contentEditable={false}
           onClick={() => annotationId && requestJump(annotationId)}
-          className="source-quote-link"
+          /* The reference belongs at the end of the passage it names, which
+             for an Arabic extract is the right-hand side. */
+          className={`source-quote-link ${rtl ? 'is-rtl' : ''}`}
           title="Go to this passage in the book"
         >
+          <Icon name="quote" className="source-quote-mark h-2.5 w-2.5" />
           <span className="truncate">{title}</span>
           <span aria-hidden>·</span>
           <span className="tabular-nums">p. {pageNumber}</span>

@@ -108,26 +108,26 @@ export function SearchPanel() {
 
   return (
     <div
-      className="fixed inset-0 z-[65] flex items-start justify-center bg-black/40 p-6 pt-[10vh]"
+      className="search-scrim"
       onPointerDown={() => setOpen(false)}
     >
       <div
         role="dialog"
         aria-label="Search"
-        className="border-line bg-elevated flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border shadow-2xl"
+        className="search-panel"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="border-line flex items-center gap-2 border-b px-3 py-2.5">
-          <Icon name="search" className="text-ink-faint" />
+        <div className="search-field">
+          <Icon name="search" className="text-ink-faint h-3.5 w-3.5" />
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
             placeholder="Search books, notes and highlights…"
-            className="text-ink placeholder:text-ink-faint flex-1 bg-transparent text-sm outline-none"
+            className="search-input"
           />
-          <div className="border-line flex overflow-hidden rounded border text-[11px]">
+          <div className="search-scope">
             <ScopeButton active={scope === 'book'} disabled={!bookId} onClick={() => setScope('book')}>
               This book
             </ScopeButton>
@@ -137,30 +137,27 @@ export function SearchPanel() {
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="search-results">
           {query.trim().length < 2 ? (
-            <p className="text-ink-faint px-3 py-6 text-center text-xs">
+            <p className="search-note">
               Type at least two characters. Diacritics are ignored — الحنيفية finds ٱلْحَنِيفِيَّة.
             </p>
           ) : running && results.total === 0 ? (
-            <p className="text-ink-faint px-3 py-6 text-center text-xs">Searching…</p>
+            <p className="search-note">Searching…</p>
           ) : results.total === 0 ? (
-            <p className="text-ink-faint px-3 py-6 text-center text-xs">No matches.</p>
+            <p className="search-note">No matches.</p>
           ) : (
             groups.map((group) => (
-              <section key={group.title} className="mb-2">
-                <h3 className="text-ink-faint px-2 pt-2 pb-1 text-[10px] font-medium tracking-wide uppercase">
-                  {group.title} · {group.hits.length}
+              <section key={group.title} className="search-group">
+                <h3 className="search-group-title">
+                  {group.title}
+                  <span className="search-count">{group.hits.length}</span>
                 </h3>
                 {group.hits.map((hit) => (
-                  <button
-                    key={hit.id}
-                    onClick={() => void activate(hit)}
-                    className="hover:bg-hover block w-full rounded px-2 py-1.5 text-start"
-                  >
-                    <div className="text-ink-faint flex items-center gap-1.5 text-[10.5px]">
-                      {/* A chapter result reads best as its path, so you can
-                          see which book and bāb it came from. */}
+                  <button key={hit.id} onClick={() => void activate(hit)} className="search-hit">
+                    {/* A chapter result reads best as its path, so you can see
+                        which book and bāb it came from. */}
+                    <div className="search-hit-path">
                       <span className="truncate" dir="auto">
                         {hit.path || hit.bookTitle}
                       </span>
@@ -168,7 +165,7 @@ export function SearchPanel() {
                     </div>
                     <p
                       dir={hit.rtl ? 'rtl' : 'ltr'}
-                      className={`text-ink mt-0.5 line-clamp-2 text-[12.5px] ${hit.rtl ? 'font-arabic' : ''}`}
+                      className={`search-hit-text ${hit.rtl ? 'font-arabic' : ''}`}
                     >
                       {hit.snippet.slice(0, hit.matchStart)}
                       <mark>{hit.snippet.slice(hit.matchStart, hit.matchEnd)}</mark>
@@ -180,7 +177,7 @@ export function SearchPanel() {
             ))
           )}
           {results.truncated && (
-            <p className="text-ink-faint px-3 py-2 text-center text-[11px]">
+            <p className="search-note">
               Showing the first matches only — narrow the query for more.
             </p>
           )}
@@ -205,7 +202,7 @@ function ScopeButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className={`px-2 py-1 ${active ? 'bg-hover text-ink' : 'text-ink-muted'} disabled:opacity-40`}
+      className={`search-scope-button ${active ? 'is-active' : ''}`}
     >
       {children}
     </button>
