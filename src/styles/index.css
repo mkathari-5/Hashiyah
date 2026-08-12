@@ -379,11 +379,11 @@
 }
 
 .ProseMirror > * + * {
-  margin-top: 0.28em;
+  margin-top: 0.2em;
 }
 
 .ProseMirror p {
-  line-height: 1.55;
+  line-height: 1.5;
 }
 
 /* Arabic prose is set larger and needs a little more room for tashkīl. */
@@ -585,10 +585,10 @@
 .ProseMirror .toggle {
   position: relative;
   display: grid;
-  grid-template-columns: 1.1rem minmax(0, 1fr);
+  grid-template-columns: 1rem minmax(0, 1fr);
   align-items: start;
-  /* §G2C — Notion-like: chevron + title on one quiet line, little chrome. */
-  margin-block: 0.12em;
+  /* Notion-like: chevron + title on one quiet line, little chrome. */
+  margin-block: 0.04em;
 }
 
 /**
@@ -621,9 +621,9 @@
   grid-column: 1;
   display: grid;
   place-items: center;
-  width: 1.05rem;
-  height: 1.5rem;
-  margin-top: 0.05em;
+  width: 1rem;
+  height: 1.35rem;
+  margin-top: 0.02em;
   border-radius: 3px;
   /* Faint at rest so a page of questions reads as prose, but a clear target
      the moment the reader goes for it (§F11). */
@@ -665,22 +665,19 @@
 }
 
 [data-toggle-summary] {
-  font-weight: 550;
-  line-height: 1.55;
-  padding-block: 0.05em;
+  font-weight: 520;
+  line-height: 1.45;
+  padding-block: 0.02em;
   cursor: text;
 }
 
 [data-toggle-content] {
-  padding-block-start: 0.15em;
-  padding-bottom: 0.1em;
-}
-[data-toggle-content] {
-  padding-block-start: 0.05em;
-  padding-inline-start: 0.1em;
+  padding-block-start: 0.02em;
+  padding-bottom: 0.02em;
+  padding-inline-start: 0.05em;
 }
 [data-toggle-content] > * + * {
-  margin-top: 0.22em;
+  margin-top: 0.16em;
 }
 
 /* Toggle headings (§32) — the title scales, the mechanism is identical.
@@ -1787,7 +1784,8 @@ svg.block-menu-icon {
   color: color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 
-.lib-add {
+.lib-add,
+.lib-more {
   display: grid;
   place-items: center;
   width: 1.1rem;
@@ -1798,12 +1796,62 @@ svg.block-menu-icon {
   opacity: 0;
   transition: opacity 120ms ease;
 }
-.lib-row:hover .lib-add {
+.lib-more {
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+.lib-row:hover .lib-add,
+.lib-row:hover .lib-more,
+.lib-row.is-editing .lib-add,
+.lib-row.is-editing .lib-more {
   opacity: 1;
 }
-.lib-add:hover {
+.lib-add:hover,
+.lib-more:hover {
   background: var(--color-line);
   color: var(--color-ink);
+}
+
+.lib-inline-input {
+  flex: 1;
+  min-width: 0;
+  height: 1.45rem;
+  margin: 0;
+  padding: 0 0.2rem;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
+  box-shadow: inset 0 -1px 0 var(--color-accent);
+}
+.lib-inline-input::placeholder {
+  color: var(--color-ink-faint);
+}
+.lib-composer {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 1.5rem;
+  padding-block: 0.1rem;
+  color: var(--color-ink-faint);
+  font-size: 12px;
+  border-radius: 3px;
+  opacity: 0.72;
+}
+.lib-composer:hover {
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
+  opacity: 1;
+}
+.lib-composer-mark {
+  width: 1.05rem;
+  text-align: center;
+  opacity: 0.7;
 }
 
 /* §E42 — science reads louder than book, book louder than chapter. */

@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { SEMANTIC_KINDS } from '@/features/notes/extensions/SemanticBlock'
+import { insertIslamicPhrase, ISLAMIC_PHRASES } from '@/features/notes/islamicPhrases'
 import { openQuranPicker } from '@/features/notes/QuranPicker'
 import { extractAndExplain, quickNoteAtCurrentPosition } from '@/services/notes/extract'
 import { useStudyStore } from '@/state/useStudyStore'
@@ -12,7 +13,7 @@ import { useStudyStore } from '@/state/useStudyStore'
  * here and it appears in both, correctly grouped, with the same keywords.
  */
 
-export type BlockGroup = 'Basic' | 'Islamic study' | 'Sources' | 'Media'
+export type BlockGroup = 'Basic' | 'Islamic text' | 'Islamic study' | 'Sources' | 'Media'
 
 export interface BlockDef {
   id: string
@@ -178,24 +179,6 @@ const ISLAMIC: BlockDef[] = [
     keywords: ['hadith', 'narration', 'sunnah'],
     run: (e) => e.chain().focus().insertHadithBlock().run(),
   },
-  {
-    id: 'saw',
-    title: 'Ṣallallāhu ʿalayhi wa sallam',
-    arabic: 'صلى الله عليه وسلم',
-    group: 'Islamic study',
-    icon: 'ﷺ',
-    keywords: ['saw', 'salallahu', 'sallallahu', 'pbuh', 'peace', 'salawat'],
-    run: (e) => e.chain().focus().insertContent('صلى الله عليه وسلم').run(),
-  },
-  {
-    id: 'saw-symbol',
-    title: 'ﷺ',
-    arabic: 'ﷺ',
-    group: 'Islamic study',
-    icon: 'ﷺ',
-    keywords: ['saw', 'symbol', 'salawat', 'pbuh'],
-    run: (e) => e.chain().focus().insertContent('ﷺ').run(),
-  },
   ...SEMANTIC_KINDS.map<BlockDef>((kind) => ({
     id: `semantic:${kind.kind}`,
     title: kind.label,
@@ -206,6 +189,29 @@ const ISLAMIC: BlockDef[] = [
     turnInto: true,
     run: (e) => e.chain().focus().setSemanticBlock(kind.kind).run(),
   })),
+]
+
+/** Compact inline honorifics — never blocks. */
+const ISLAMIC_TEXT: BlockDef[] = [
+  ...ISLAMIC_PHRASES.map<BlockDef>((phrase) => ({
+    id: `phrase:${phrase.shortcut}`,
+    // Arabic first, shortcut for muscle memory — single line, no duplicate glyph.
+    title: `${phrase.text} — /${phrase.shortcut}`,
+    group: 'Islamic text',
+    icon: 'ـ',
+    keywords: [phrase.shortcut, `/${phrase.shortcut}`, phrase.title.toLowerCase(), phrase.text],
+    run: (e) => {
+      insertIslamicPhrase(e, phrase.text)
+    },
+  })),
+  {
+    id: 'saw-symbol',
+    title: 'ﷺ — symbol',
+    group: 'Islamic text',
+    icon: 'ﷺ',
+    keywords: ['saw', 'symbol', 'salawat', 'pbuh', 'ﷺ'],
+    run: (e) => insertIslamicPhrase(e, 'ﷺ'),
+  },
 ]
 
 const SOURCES: BlockDef[] = [
@@ -250,9 +256,9 @@ const MEDIA: BlockDef[] = [
   },
 ]
 
-export const BLOCK_CATALOGUE: BlockDef[] = [...BASIC, ...ISLAMIC, ...SOURCES, ...MEDIA]
+export const BLOCK_CATALOGUE: BlockDef[] = [...BASIC, ...ISLAMIC_TEXT, ...ISLAMIC, ...SOURCES, ...MEDIA]
 
-export const GROUP_ORDER: BlockGroup[] = ['Basic', 'Islamic study', 'Sources', 'Media']
+export const GROUP_ORDER: BlockGroup[] = ['Basic', 'Islamic text', 'Islamic study', 'Sources', 'Media']
 
 /**
  * Ranked filter. An exact keyword match beats a prefix match, which beats a

@@ -8,7 +8,7 @@ import { navigationOutline } from '@/services/notes/NotesService'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
-import type { LibraryNode, LibraryNodeType } from '@/types'
+import type { LibraryNode } from '@/types'
 
 /**
  * The compact library while studying (§E4).
@@ -21,6 +21,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
   const requestScrollTo = useNotesStore((s) => s.requestScrollTo)
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
+  const [renameRequest, setRenameRequest] = useState<{ id: string; arabic?: boolean } | null>(null)
 
   /**
    * The active chapter's outline, read from its saved document.
@@ -43,15 +44,6 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   // actually changes, not merely because a save produced a new object.
   const outlineKey = JSON.stringify(outlineRaw)
   const outline = useMemo(() => outlineRaw, [outlineKey]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const addChild = async (parent: LibraryNode) => {
-    const type: LibraryNodeType = parent.type === 'book' || parent.type === 'course' ? 'chapter' : 'book'
-    const title = window.prompt(type === 'chapter' ? 'Chapter title' : 'Book title', '')?.trim()
-    if (!title) return
-    const arabicTitle = window.prompt('Arabic title (optional)', '')?.trim() || undefined
-    await libraryRepo.create({ parentId: parent.id, type, title, arabicTitle })
-    await libraryRepo.update(parent.id, { collapsed: false })
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -79,7 +71,8 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
           variant="sidebar"
           outline={outline}
           onOutlineJump={(blockId) => activeNoteId && requestScrollTo(activeNoteId, blockId)}
-          onAdd={(node) => void addChild(node)}
+          renameRequest={renameRequest}
+          onRenameRequestHandled={() => setRenameRequest(null)}
           onContextMenu={(node, event) => setMenu({ node, x: event.clientX, y: event.clientY })}
         />
       </div>
@@ -93,14 +86,23 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
           >
             <button
               className="block-menu-item"
-              onClick={async () => {
-                const title = window.prompt('Title', menu.node.title)?.trim()
-                if (title) await libraryRepo.update(menu.node.id, { title })
+              onClick={() => {
+                setRenameRequest({ id: menu.node.id, arabic: false })
                 setMenu(null)
               }}
             >
               <Icon name="pencil" className="block-menu-icon" />
               <span className="flex-1">Rename</span>
+            </button>
+            <button
+              className="block-menu-item"
+              onClick={() => {
+                setRenameRequest({ id: menu.node.id, arabic: true })
+                setMenu(null)
+              }}
+            >
+              <span className="block-menu-icon font-arabic">ع</span>
+              <span className="flex-1">Arabic title</span>
             </button>
             <button
               className="block-menu-item"
@@ -119,8 +121,8 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
                 const kids = await libraryRepo.descendants(menu.node.id)
                 const message =
                   kids.length > 0
-                    ? `Delete “${menu.node.title}” and ${kids.length} item${kids.length === 1 ? '' : 's'} inside it?\n\nTheir notes will be deleted. The PDF itself is kept.`
-                    : `Delete “${menu.node.title}”?\n\nIts notes will be deleted. The PDF itself is kept.`
+                    ? `Delete “${menu.node.title || 'Untitled'}” and ${kids.length} item${kids.length === 1 ? '' : 's'} inside it?\n\nTheir notes will be deleted. The PDF itself is kept.`
+                    : `Delete “${menu.node.title || 'Untitled'}”?\n\nIts notes will be deleted. The PDF itself is kept.`
                 if (window.confirm(message)) await libraryRepo.remove(menu.node.id)
                 setMenu(null)
               }}

@@ -5,7 +5,7 @@ import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryTree, NodeTitle } from '@/features/library/LibraryTree'
 import { Icon } from '@/features/shell/Icon'
 import { useLibraryStore } from '@/state/useLibraryStore'
-import type { LibraryNode, LibraryNodeType } from '@/types'
+import type { LibraryNode } from '@/types'
 
 /**
  * The Library home (§E1, §E24).
@@ -21,6 +21,7 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
   // Undefined until resolved — so "empty" is not painted during the first tick.
   const allNodes = useLiveQuery(() => libraryRepo.all(), [])
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
+  const [renameRequest, setRenameRequest] = useState<{ id: string; arabic?: boolean } | null>(null)
 
   const continueWith = recent[0]
   const libraryReady = allNodes !== undefined
@@ -39,17 +40,6 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
       parent = parent.parentId ? byId.get(parent.parentId) : undefined
     }
     return out
-  }
-
-  const addChild = async (parent: LibraryNode) => {
-    const type: LibraryNodeType =
-      parent.type === 'book' || parent.type === 'course' ? 'chapter' : 'book'
-    const label = type === 'chapter' ? 'New chapter' : 'New book'
-    const title = window.prompt(`${label} — English title`, '')?.trim()
-    if (!title) return
-    const arabicTitle = window.prompt(`${label} — Arabic title (optional)`, '')?.trim() || undefined
-    await libraryRepo.create({ parentId: parent.id, type, title, arabicTitle })
-    await libraryRepo.update(parent.id, { collapsed: false })
   }
 
   return (
@@ -141,13 +131,23 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
           <LibraryTree
             variant="home"
             suppressEmpty
-            onAdd={(node) => void addChild(node)}
+            renameRequest={renameRequest}
+            onRenameRequestHandled={() => setRenameRequest(null)}
             onContextMenu={(node, event) => setMenu({ node, x: event.clientX, y: event.clientY })}
           />
         </section>
       </div>
 
-      {menu && <NodeMenu {...menu} onClose={() => setMenu(null)} />}
+      {menu && (
+        <NodeMenu
+          {...menu}
+          onClose={() => setMenu(null)}
+          onRename={(arabic) => {
+            setRenameRequest({ id: menu.node.id, arabic })
+            setMenu(null)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -181,30 +181,20 @@ function NodeMenu({
   x,
   y,
   onClose,
+  onRename,
 }: {
   node: LibraryNode
   x: number
   y: number
   onClose: () => void
+  onRename: (arabic?: boolean) => void
 }) {
-  const isContainer = ['science', 'folder', 'book', 'course'].includes(node.type)
-
-  const rename = async () => {
-    const title = window.prompt('Title', node.title)?.trim()
-    if (title) await libraryRepo.update(node.id, { title })
-    onClose()
-  }
-  const renameArabic = async () => {
-    const arabicTitle = window.prompt('Arabic title', node.arabicTitle ?? '')?.trim()
-    await libraryRepo.update(node.id, { arabicTitle: arabicTitle || undefined })
-    onClose()
-  }
   const remove = async () => {
     const kids = await libraryRepo.descendants(node.id)
     const warning =
       kids.length > 0
-        ? `Delete “${node.title}” and ${kids.length} item${kids.length === 1 ? '' : 's'} inside it?\n\nNotes belonging to them will be deleted. The PDF itself is kept.`
-        : `Delete “${node.title}”?\n\nIts notes will be deleted. The PDF itself is kept.`
+        ? `Delete “${node.title || 'Untitled'}” and ${kids.length} item${kids.length === 1 ? '' : 's'} inside it?\n\nNotes belonging to them will be deleted. The PDF itself is kept.`
+        : `Delete “${node.title || 'Untitled'}”?\n\nIts notes will be deleted. The PDF itself is kept.`
     if (!window.confirm(warning)) return
     await libraryRepo.remove(node.id)
     onClose()
@@ -214,11 +204,11 @@ function NodeMenu({
     <>
       <div className="fixed inset-0 z-40" onClick={onClose} onContextMenu={(e) => e.preventDefault()} />
       <div className="node-menu" style={{ left: Math.min(x, window.innerWidth - 220), top: y }}>
-        <button className="block-menu-item" onClick={rename}>
+        <button className="block-menu-item" onClick={() => onRename(false)}>
           <Icon name="pencil" className="block-menu-icon" />
           <span className="flex-1">Rename</span>
         </button>
-        <button className="block-menu-item" onClick={renameArabic}>
+        <button className="block-menu-item" onClick={() => onRename(true)}>
           <span className="block-menu-icon font-arabic">ع</span>
           <span className="flex-1">Arabic title</span>
         </button>
@@ -232,31 +222,11 @@ function NodeMenu({
           <Icon name="star" className="block-menu-icon" />
           <span className="flex-1">{node.favorite ? 'Remove favourite' : 'Favourite'}</span>
         </button>
-        {isContainer && (
-          <button
-            className="block-menu-item"
-            onClick={async () => {
-              const type: LibraryNodeType = node.type === 'book' || node.type === 'course' ? 'chapter' : 'book'
-              const title = window.prompt(type === 'chapter' ? 'Chapter title' : 'Book title', '')?.trim()
-              if (title) {
-                await libraryRepo.create({ parentId: node.id, type, title })
-                await libraryRepo.update(node.id, { collapsed: false })
-              }
-              onClose()
-            }}
-          >
-            <Icon name="plus" className="block-menu-icon" />
-            <span className="flex-1">{node.type === 'book' || node.type === 'course' ? 'New chapter' : 'New book'}</span>
-          </button>
-        )}
         <button
           className="block-menu-item"
           onClick={async () => {
-            const title = window.prompt('Notes item title', '')?.trim()
-            if (title) {
-              await libraryRepo.create({ parentId: node.id, type: 'notes', title })
-              await libraryRepo.update(node.id, { collapsed: false })
-            }
+            await libraryRepo.create({ parentId: node.id, type: 'notes', title: '' })
+            await libraryRepo.update(node.id, { collapsed: false })
             onClose()
           }}
         >

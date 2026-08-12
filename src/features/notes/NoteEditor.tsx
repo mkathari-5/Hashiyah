@@ -2,6 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'r
 import type { Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import HardBreak from '@tiptap/extension-hard-break'
 import Highlight from '@tiptap/extension-highlight'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
@@ -42,6 +43,15 @@ const extensions = [
   StarterKit.configure({
     link: { openOnClick: false, autolink: true },
     heading: { levels: [1, 2, 3] },
+    // Shift+Enter creates the next Toggle when inside one; hard breaks use Mod-Enter.
+    hardBreak: false,
+  }),
+  HardBreak.extend({
+    addKeyboardShortcuts() {
+      return {
+        'Mod-Enter': () => this.editor.commands.setHardBreak(),
+      }
+    },
   }),
   Highlight.configure({ multicolor: true }),
   TextStyle,

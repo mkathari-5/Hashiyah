@@ -2,31 +2,25 @@ import { Node, mergeAttributes } from '@tiptap/core'
 import { TextSelection } from '@tiptap/pm/state'
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { detectDirection } from '@/lib/dir'
+import {
+  deleteEmptyToggle,
+  emptyToggleShell,
+  enterFromEmptyBody,
+  findToggle,
+  insertSiblingToggle,
+  nestUnderPreviousToggle,
+  outdentToggle,
+} from '@/features/notes/extensions/toggleOutline'
 
 /**
  * Collapsible sections (§25–§39).
  *
- * ── Why this is no longer built on <details> ──────────────────────────────
- *
- * The previous implementation used native `<details>`/`<summary>` and listened
- * for the DOM `toggle` event through ProseMirror's `handleDOMEvents`. That can
- * never work, and the reason is worth recording: **the `toggle` event does not
- * bubble**. ProseMirror attaches those handlers on its root element, so the
- * event fired on a nested `<details>` never reached it. `attrs.open` therefore
- * stayed `true` forever, and the moment any transaction re-rendered the node
- * from its attributes the browser's collapse was overwritten — the section
- * sprang back open.
- *
- * So the state had two owners that could not see each other: the browser owned
- * the disclosure, ProseMirror owned the markup.
- *
- * Now the document is the single owner. `open` is a node attribute, an explicit
- * arrow button is the only thing that changes it, and the rendering follows
- * from the attribute. Collapsing hides the content element rather than
- * unmounting it, because ProseMirror requires its contentDOM to stay in the
- * tree — unmounting it would corrupt position mapping. The content is *inside*
- * the node, so hiding the wrapper hides paragraphs, lists, quotes, images and
- * nested toggles together (§27), which the old version could not guarantee.
+ * Document owns `open`. The arrow is the only collapse control. Keyboard model:
+ * - Enter in a filled title → open + enter body
+ * - Shift+Enter → next sibling toggle (rapid questions)
+ * - Enter on the empty last body paragraph → next sibling toggle
+ * - Tab / Shift+Tab → nest / outdent when safe
+ * - Backspace on a fully empty toggle → remove it
  */
 
 declare module '@tiptap/core' {
@@ -50,8 +44,6 @@ export const ToggleSummary = Node.create({
   selectable: false,
 
   parseHTML() {
-    // `summary` is accepted so notes written by the previous implementation
-    // still parse — the schema shape is unchanged, only the markup moved.
     return [{ tag: 'div[data-toggle-summary]' }, { tag: 'summary' }]
   },
 
@@ -81,9 +73,6 @@ function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
   const level = Number(node.attrs.level ?? 0)
 
   const setOpen = (next: boolean) => {
-    // If we are collapsing while the caret sits inside the content, move it to
-    // the end of the title first — leaving a cursor inside hidden content is
-    // how editors end up typing into the void.
     if (!next && typeof getPos === 'function') {
       const pos = getPos()
       if (pos !== undefined) {
@@ -107,19 +96,12 @@ function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
       data-toggle=""
       data-open={open ? 'true' : 'false'}
       data-level={level || undefined}
-      // A node view does not inherit the attributes `renderHTML` would emit,
-      // so the block id has to be set explicitly — without it, jumping to a
-      // toggle from the outline or a search result finds nothing.
       data-block-id={node.attrs.blockId ?? undefined}
-      // Computed here rather than in CSS: a `:has()` rule would also match a
-      // nested toggle's Arabic title and flip the wrong arrow.
       data-dir={detectDirection(node.child(0).textContent, 'ltr')}
     >
       <button
         type="button"
         contentEditable={false}
-        // §30 — the arrow is the only collapse target. Clicking the title text
-        // must place the caret, never fold the section away mid-sentence.
         onMouseDown={(event) => {
           event.preventDefault()
           event.stopPropagation()
@@ -153,6 +135,8 @@ function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+export { isEmptyToggle } from '@/features/notes/extensions/toggleOutline'
+
 export const ToggleBlock = Node.create({
   name: 'toggleBlock',
   group: 'block',
@@ -166,13 +150,11 @@ export const ToggleBlock = Node.create({
         parseHTML: (el) => {
           const explicit = el.getAttribute('data-open')
           if (explicit !== null) return explicit !== 'false'
-          // Legacy markup: a bare <details> is closed, <details open> is open.
           if (el.tagName === 'DETAILS') return el.hasAttribute('open')
           return true
         },
         renderHTML: (attrs) => ({ 'data-open': attrs.open === false ? 'false' : 'true' }),
       },
-      /** 0 = plain toggle, 1–3 = toggle heading (§32). */
       level: {
         default: 0,
         parseHTML: (el) => Number(el.getAttribute('data-level') ?? 0),
@@ -199,13 +181,8 @@ export const ToggleBlock = Node.create({
         ({ level = 0 } = {}) =>
         ({ tr, dispatch, editor }) => {
           const { schema } = editor
-          const node = schema.nodes[this.name].create({ open: true, level }, [
-            schema.nodes.toggleSummary.create(),
-            schema.nodes.toggleContent.create(null, schema.nodes.paragraph.create()),
-          ])
+          const node = emptyToggleShell(schema, level)
 
-          // Replace the (empty) block the slash command was typed in rather
-          // than inserting after it and leaving a stray paragraph behind.
           const { $from } = tr.selection
           const inEmptyParagraph =
             $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0
@@ -214,7 +191,6 @@ export const ToggleBlock = Node.create({
           tr.replaceWith(from, to, node)
 
           if (dispatch) {
-            // The caret belongs in the title — it is the first thing you write.
             dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(from + 2), 1)).scrollIntoView())
           }
           return true
@@ -232,7 +208,6 @@ export const ToggleBlock = Node.create({
           const from = $from.before(depth)
           const to = $from.after(depth)
 
-          // The existing text becomes the title; nothing is discarded (§33).
           const node = schema.nodes[this.name].create({ open: true, level }, [
             schema.nodes.toggleSummary.create(null, block.content),
             schema.nodes.toggleContent.create(null, schema.nodes.paragraph.create()),
@@ -264,45 +239,59 @@ export const ToggleBlock = Node.create({
   },
 
   addKeyboardShortcuts() {
-    const findToggle = (state: import('@tiptap/pm/state').EditorState) => {
-      const { $from } = state.selection
-      for (let depth = $from.depth; depth > 0; depth--) {
-        if ($from.node(depth).type.name === this.name) {
-          return { node: $from.node(depth), pos: $from.before(depth), depth }
-        }
-      }
-      return null
-    }
-
     return {
-      /** Enter at the end of the title moves into the body (§31). */
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection
-        if (!empty || $from.parent.type.name !== 'toggleSummary') return false
+        if (!empty) return false
 
-        const found = findToggle(editor.state)
-        if (!found) return false
+        if ($from.parent.type.name === 'toggleSummary') {
+          const found = findToggle(editor.state)
+          if (!found) return false
 
-        // Typing into a collapsed section would be invisible, so open it first.
-        if (found.node.attrs.open === false) {
-          editor.commands.command(({ tr, dispatch }) => {
-            tr.setNodeAttribute(found.pos, 'open', true)
+          if (found.node.attrs.open === false) {
+            editor.commands.command(({ tr, dispatch }) => {
+              tr.setNodeAttribute(found.pos, 'open', true)
+              if (dispatch) dispatch(tr)
+              return true
+            })
+          }
+
+          const contentStart = found.pos + 1 + found.node.child(0).nodeSize + 1
+          return editor.commands.command(({ tr, dispatch }) => {
+            tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart), 1)).scrollIntoView()
             if (dispatch) dispatch(tr)
             return true
           })
         }
 
-        const contentStart = found.pos + 1 + found.node.child(0).nodeSize + 1
-        return editor.commands.setTextSelection(contentStart)
+        return enterFromEmptyBody(editor.state, editor.view.dispatch.bind(editor.view))
       },
 
-      /**
-       * Backspace at the very start of the body returns to the end of the
-       * title, instead of silently merging the first paragraph into it.
-       */
+      /** Rapid consecutive toggles without typing `/toggle` again. */
+      'Shift-Enter': ({ editor }) => {
+        if (!findToggle(editor.state)) return false
+        return insertSiblingToggle(editor.state, editor.view.dispatch.bind(editor.view))
+      },
+
+      Tab: ({ editor }) => {
+        if (!findToggle(editor.state)) return false
+        return nestUnderPreviousToggle(editor.state, editor.view.dispatch.bind(editor.view))
+      },
+
+      'Shift-Tab': ({ editor }) => {
+        if (!findToggle(editor.state)) return false
+        return outdentToggle(editor.state, editor.view.dispatch.bind(editor.view))
+      },
+
       Backspace: ({ editor }) => {
         const { $from, empty } = editor.state.selection
-        if (!empty || $from.parentOffset !== 0) return false
+        if (!empty) return false
+
+        if ($from.parent.type.name === 'toggleSummary' && $from.parentOffset === 0) {
+          if (deleteEmptyToggle(editor.state, editor.view.dispatch.bind(editor.view))) return true
+        }
+
+        if ($from.parentOffset !== 0) return false
         if ($from.depth < 2) return false
         if ($from.node(-1).type.name !== 'toggleContent') return false
         if ($from.index(-1) !== 0) return false
@@ -310,11 +299,13 @@ export const ToggleBlock = Node.create({
 
         const found = findToggle(editor.state)
         if (!found) return false
+
+        if (deleteEmptyToggle(editor.state, editor.view.dispatch.bind(editor.view))) return true
+
         const summaryEnd = found.pos + 1 + found.node.child(0).nodeSize - 1
         return editor.commands.setTextSelection(summaryEnd)
       },
 
-      /** Fold or unfold the toggle the caret is currently inside. */
       'Mod-Alt-t': ({ editor }) => {
         const found = findToggle(editor.state)
         if (!found) return false
