@@ -1,5 +1,6 @@
 import type { Editor } from '@tiptap/core'
 import { SEMANTIC_KINDS } from '@/features/notes/extensions/SemanticBlock'
+import { openQuranPicker } from '@/features/notes/QuranPicker'
 import { extractAndExplain, quickNoteAtCurrentPosition } from '@/services/notes/extract'
 import { useStudyStore } from '@/state/useStudyStore'
 
@@ -165,8 +166,8 @@ const ISLAMIC: BlockDef[] = [
     arabic: 'قرآن',
     group: 'Islamic study',
     icon: '﴿﴾',
-    keywords: ['quran', 'ayah', 'verse', 'aya'],
-    run: (e) => e.chain().focus().insertQuranBlock().run(),
+    keywords: ['quran', 'ayah', 'verse', 'aya', 'quran'],
+    run: (e) => openQuranPicker(e),
   },
   {
     id: 'hadithBlock',
@@ -176,6 +177,24 @@ const ISLAMIC: BlockDef[] = [
     icon: '❁',
     keywords: ['hadith', 'narration', 'sunnah'],
     run: (e) => e.chain().focus().insertHadithBlock().run(),
+  },
+  {
+    id: 'saw',
+    title: 'Ṣallallāhu ʿalayhi wa sallam',
+    arabic: 'صلى الله عليه وسلم',
+    group: 'Islamic study',
+    icon: 'ﷺ',
+    keywords: ['saw', 'salallahu', 'sallallahu', 'pbuh', 'peace', 'salawat'],
+    run: (e) => e.chain().focus().insertContent('صلى الله عليه وسلم').run(),
+  },
+  {
+    id: 'saw-symbol',
+    title: 'ﷺ',
+    arabic: 'ﷺ',
+    group: 'Islamic study',
+    icon: 'ﷺ',
+    keywords: ['saw', 'symbol', 'salawat', 'pbuh'],
+    run: (e) => e.chain().focus().insertContent('ﷺ').run(),
   },
   ...SEMANTIC_KINDS.map<BlockDef>((kind) => ({
     id: `semantic:${kind.kind}`,

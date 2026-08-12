@@ -210,6 +210,8 @@
 }
 
 .pdf-page > canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
@@ -221,6 +223,62 @@
   inset: 0;
   z-index: 1;
   pointer-events: none;
+}
+
+/* pdf.js selection helper — expand through gaps while the pointer is down. */
+.pdf-page.selecting .textLayer .endOfContent {
+  top: 0;
+  bottom: 0;
+}
+
+.ocr-text-layer span {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  line-height: 1;
+  overflow: hidden;
+  cursor: text;
+}
+
+.ocr-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in srgb, var(--color-hl-rose) 8%, var(--color-panel));
+  font-size: 11.5px;
+}
+.ocr-banner-label {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 10px;
+  color: var(--color-hl-rose);
+}
+.ocr-banner-hint {
+  color: var(--color-ink-muted);
+  flex: 1;
+  min-width: 12rem;
+}
+.ocr-banner-action {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 4px;
+  color: var(--color-ink);
+  background: var(--color-elevated);
+}
+.ocr-banner-action:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.ocr-banner-action:disabled {
+  opacity: 0.55;
+}
+.ocr-banner-error {
+  color: var(--color-hl-rose);
+  width: 100%;
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -297,8 +355,9 @@
  */
 .note-surface {
   --note-measure: none;
-  padding-inline: clamp(1.35rem, 4%, 2.25rem);
-  padding-block: 1.1rem 0;
+  /* §G2 — Notion-like density: modest padding, not a publishing margin. */
+  padding-inline: clamp(1rem, 3%, 1.75rem);
+  padding-block: 0.65rem 0;
 }
 
 .note-surface[data-note-focus='true'] {
@@ -310,7 +369,7 @@
   outline: none;
   min-height: 100%;
   padding-bottom: 40vh; /* room to type at the bottom without scroll-fighting */
-  font-size: 14.5px;
+  font-size: 14px;
   color: var(--color-ink);
 }
 
@@ -320,17 +379,19 @@
 }
 
 .ProseMirror > * + * {
-  margin-top: 0.6em;
+  margin-top: 0.28em;
 }
 
 .ProseMirror p {
-  line-height: 1.72;
+  line-height: 1.55;
 }
 
-/* Arabic prose is set larger and needs the extra room between paragraphs to
-   match, or the page reads tighter in Arabic than it does in English. */
+/* Arabic prose is set larger and needs a little more room for tashkīl. */
 .ProseMirror > p[dir='rtl'] + p[dir='rtl'] {
-  margin-top: 0.75em;
+  margin-top: 0.4em;
+}
+.ProseMirror p[dir='rtl'] {
+  line-height: 1.85;
 }
 
 .ProseMirror h1,
@@ -341,24 +402,24 @@
 }
 
 .ProseMirror h1 {
-  font-size: 1.5rem;
+  font-size: 1.35rem;
   font-weight: 640;
   letter-spacing: -0.015em;
   line-height: 1.3;
-  margin-top: 1.5em;
+  margin-top: 0.95em;
 }
 .ProseMirror h2 {
-  font-size: 1.2rem;
+  font-size: 1.12rem;
   font-weight: 620;
   letter-spacing: -0.01em;
   line-height: 1.35;
-  margin-top: 1.4em;
+  margin-top: 0.85em;
 }
 .ProseMirror h3 {
-  font-size: 1.02rem;
+  font-size: 1rem;
   font-weight: 640;
   letter-spacing: -0.004em;
-  margin-top: 1.2em;
+  margin-top: 0.7em;
 }
 .ProseMirror h1[dir='rtl'],
 .ProseMirror h2[dir='rtl'],
@@ -524,9 +585,10 @@
 .ProseMirror .toggle {
   position: relative;
   display: grid;
-  grid-template-columns: 1.25rem minmax(0, 1fr);
+  grid-template-columns: 1.1rem minmax(0, 1fr);
   align-items: start;
-  margin-block: 0.45em;
+  /* §G2C — Notion-like: chevron + title on one quiet line, little chrome. */
+  margin-block: 0.12em;
 }
 
 /**
@@ -613,8 +675,12 @@
   padding-block-start: 0.15em;
   padding-bottom: 0.1em;
 }
+[data-toggle-content] {
+  padding-block-start: 0.05em;
+  padding-inline-start: 0.1em;
+}
 [data-toggle-content] > * + * {
-  margin-top: 0.45em;
+  margin-top: 0.22em;
 }
 
 /* Toggle headings (§32) — the title scales, the mechanism is identical.
@@ -637,7 +703,7 @@
 .ProseMirror .toggle[data-level='1'],
 .ProseMirror .toggle[data-level='2'],
 .ProseMirror .toggle[data-level='3'] {
-  margin-block: 0.9em 0.35em;
+  margin-block: 0.45em 0.2em;
 }
 
 /* Arabic titles put the arrow on the other side. `data-dir` is computed by the
@@ -666,9 +732,9 @@
 .ProseMirror [data-semantic-block] {
   --semantic-color: var(--color-hl-neutral);
   border-inline-start: 2px solid color-mix(in srgb, var(--semantic-color) 75%, transparent);
-  padding-inline-start: 0.9em;
-  padding-block: 0.1em 0.15em;
-  margin-block: 0.8em;
+  padding-inline-start: 0.75em;
+  padding-block: 0.05em 0.1em;
+  margin-block: 0.4em;
 }
 
 /* icon + label in one line, drawn by CSS so the node's content stays purely
@@ -846,18 +912,15 @@
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
-   Qur'ān and Ḥadīth blocks (§14, §15) — Arabic is the point, so it is set
-   large and given room; the metadata stays out of the way underneath.
+   Qur'ān and Ḥadīth — compact supporting quotations by default (§G3E).
    ─────────────────────────────────────────────────────────────────────────── */
 .scripture {
   position: relative;
-  margin-block: 1.15em;
-  padding-block: 0.75em;
-  padding-inline: 1.1em 0.4em;
+  margin-block: 0.45em;
+  padding-block: 0.15em;
+  padding-inline: 0.7em 0.2em;
 }
 
-/* §F14 — the rule, the label and the text itself all speak with one voice:
-   revelation is red, the Prophet ﷺ is green. */
 .scripture-quran {
   --scripture-ink: var(--color-quran);
 }
@@ -868,43 +931,78 @@
 .scripture-rule {
   position: absolute;
   inset-inline-start: 0;
-  top: 0;
-  bottom: 0;
-  width: 2px;
+  top: 0.2em;
+  bottom: 0.2em;
+  width: 1.5px;
   border-radius: 1px;
-  background: color-mix(in srgb, var(--scripture-ink) 55%, transparent);
+  background: color-mix(in srgb, var(--scripture-ink) 45%, transparent);
 }
 
-.scripture-head {
-  display: flex;
-  align-items: baseline;
-  gap: 0.6em;
-  margin-bottom: 0.25em;
-  user-select: none;
+.scripture.is-compact .scripture-body {
+  font-size: 1.18em;
+  line-height: 1.9;
+  min-height: 0;
 }
-.scripture-kind {
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: color-mix(in srgb, var(--scripture-ink) 85%, var(--color-ink-muted));
+.scripture.is-display {
+  margin-block: 0.85em;
+  padding-block: 0.45em;
 }
-/* Introductory wording is not the quotation, so it stays in ordinary ink. */
-.scripture-intro {
-  font-size: 1.05em;
-  color: var(--color-ink-muted);
+.scripture.is-display .scripture-body {
+  font-size: 1.38em;
+  line-height: 2.15;
+}
+.scripture.is-display .scripture-rule {
+  width: 2px;
 }
 
 /**
  * The quoted text — and only the quoted text — carries the colour. Sūrah
- * numbers, narrators, gradings and the reader's own translation sit outside
- * this element and stay muted, because they are apparatus rather than speech.
+ * numbers, narrators, gradings and translations sit outside this element.
  */
 .scripture-body {
-  font-size: 1.44em;
-  line-height: 2.2;
+  font-size: 1.18em;
+  line-height: 1.9;
   color: var(--scripture-ink, var(--color-ink));
-  min-height: 2em;
+  min-height: 0;
+}
+
+.scripture-translation-line {
+  margin-top: 0.15em;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-ink-muted);
+}
+
+.scripture-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  margin-top: 0.15em;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+.scripture-ref {
+  letter-spacing: 0.01em;
+}
+.scripture-tr-id {
+  opacity: 0.85;
+}
+.scripture-mode {
+  margin-inline-start: auto;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  color: var(--color-ink-faint);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.scripture:hover .scripture-mode,
+.scripture-mode:focus-visible {
+  opacity: 1;
+}
+.scripture-mode:hover {
+  background: var(--color-hover);
+  color: var(--color-ink-muted);
 }
 
 /* The speech of the ṣaḥābah and the salaf, wherever it is written down. */
@@ -2459,6 +2557,110 @@ svg.block-menu-icon {
   .topbar-layouts {
     display: none;
   }
+}
+
+/* Qurʾān picker (§G3A) */
+.quran-picker-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12vh 1rem 2rem;
+  background: rgb(0 0 0 / 0.28);
+}
+.quran-picker {
+  width: min(36rem, 100%);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-popover);
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-popover);
+}
+.quran-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--color-line);
+}
+.quran-picker-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13.5px;
+  color: var(--color-ink);
+}
+.quran-picker-range {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+.quran-picker-range-input {
+  width: 3rem;
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  padding: 0.15rem 0.3rem;
+  background: var(--color-canvas);
+  font-size: 12px;
+  color: var(--color-ink);
+}
+.quran-picker-meta {
+  padding: 0.25rem 0.75rem;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+.quran-picker-results {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem;
+}
+.quran-picker-hit {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: 4px;
+  text-align: start;
+}
+.quran-picker-hit:hover,
+.quran-picker-hit.is-active {
+  background: var(--color-hover);
+}
+.quran-picker-ar {
+  font-size: 1.15em;
+  line-height: 1.85;
+  color: var(--color-quran);
+}
+.quran-picker-en {
+  margin-top: 0.15em;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-ink-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.quran-picker-ref {
+  margin-top: 0.2em;
+  font-size: 10.5px;
+  color: var(--color-ink-faint);
+}
+.quran-picker-note {
+  padding: 1rem 0.75rem;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--color-ink-faint);
 }
 
 @layer utilities {

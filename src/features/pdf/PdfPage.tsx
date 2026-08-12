@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { pagesRepo } from '@/db/repos/documents'
+import { OcrTextLayer } from '@/features/pdf/OcrTextLayer'
 import { normalizeForSearch } from '@/lib/arabic'
 import { pageId } from '@/lib/id'
 import { AnnotationEngine } from '@/services/annotations/AnnotationEngine'
@@ -8,7 +9,7 @@ import { captureSelection, offsetsToRects, type PageTextContext } from '@/servic
 import { buildPageText } from '@/services/pdf/pageText'
 import { pdfjs, type PDFDocumentProxy } from '@/services/pdf/pdfjs'
 import { useStudyStore } from '@/state/useStudyStore'
-import type { Annotation, NormalizedRect } from '@/types'
+import type { Annotation, NormalizedRect, PageRecord, TextSource } from '@/types'
 
 export interface PageContextRegistry {
   set: (pageNumber: number, ctx: PageTextContext | null) => void
@@ -41,6 +42,7 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
   const ctxRef = useRef<PageTextContext | null>(null)
   const [textReady, setTextReady] = useState(false)
   const [height, setHeight] = useState(() => Math.round(width * aspect))
+  const [useOcrOverlay, setUseOcrOverlay] = useState(false)
 
   const setSelection = useStudyStore((s) => s.setSelection)
   const setActiveAnnotation = useStudyStore((s) => s.setActiveAnnotation)
@@ -48,9 +50,23 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
   const activeAnnotationId = useStudyStore((s) => s.activeAnnotationId)
   const jumpRequest = useStudyStore((s) => s.jumpRequest)
 
+  const pageRecord = useLiveQuery(
+    () => (visible ? pagesRepo.get(documentId, pageNumber) : undefined),
+    [documentId, pageNumber, visible],
+  ) as (PageRecord & { ocrWords?: PageRecord['ocrWords'] }) | undefined
+
   useEffect(() => setHeight(Math.round(width * aspect)), [width, aspect])
 
-  // ── Render canvas + text layer ────────────────────────────────────────────
+  const publishCtx = useCallback(
+    (ctx: PageTextContext | null) => {
+      ctxRef.current = ctx
+      registry.set(pageNumber, ctx)
+      setTextReady(!!ctx)
+    },
+    [pageNumber, registry],
+  )
+
+  // ── Render canvas + embedded text layer ───────────────────────────────────
   useEffect(() => {
     if (!visible || width <= 0) return
     let cancelled = false
@@ -76,11 +92,9 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       canvas.width = Math.floor(viewport.width * dpr)
       canvas.height = Math.floor(viewport.height * dpr)
+      canvas.style.width = `${viewport.width}px`
+      canvas.style.height = `${viewport.height}px`
 
-      // Painting is started but deliberately *not* awaited. The text layer is
-      // what makes a page selectable, and it must not queue behind rasterising
-      // a 300 dpi scan — nor be lost entirely if that raster fails. Two
-      // independent pipelines onto the same page box.
       const task = page.render({
         canvas,
         viewport,
@@ -88,7 +102,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       })
       renderTask = task
       task.promise.catch((error: unknown) => {
-        // A cancelled render is normal: fast scrolling, zoom change, unmount.
         if (!(error instanceof Error) || !/cancel/i.test(error.message)) {
           console.error(`[pdf] page ${pageNumber} failed to paint`, error)
         }
@@ -98,46 +111,74 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       if (cancelled) return
       const items = content.items as { str?: string; hasEOL?: boolean }[]
       const { text, itemOffsets } = buildPageText(items)
+      const hasEmbedded = text.trim().length > 0
 
+      // Prefer a live OCR overlay when this page was recognised and has no
+      // usable embedded text — pdf.js would otherwise leave an empty layer.
+      const stored = await pagesRepo.get(documentId, pageNumber)
+      const preferOcr =
+        !hasEmbedded &&
+        stored?.textSource === 'ocr' &&
+        !!stored.ocrWords?.length &&
+        stored.hasTextLayer
+
+      if (preferOcr) {
+        textEl.replaceChildren()
+        if (!cancelled) setUseOcrOverlay(true)
+        return
+      }
+
+      setUseOcrOverlay(false)
       textEl.replaceChildren()
       textLayer = new pdfjs.TextLayer({ textContentSource: content, container: textEl, viewport })
       await textLayer.render()
       if (cancelled) return
 
-      // The tag that makes DOM selection convertible to canonical offsets.
+      // pdf.js uses an end-of-content marker so drag-selections that start in
+      // whitespace still expand across spans (viewer helper behaviour).
+      const end = document.createElement('div')
+      end.className = 'endOfContent'
+      textEl.appendChild(end)
+
       textLayer.textDivs.forEach((div, index) => {
         div.dataset.i = String(index)
       })
 
-      const ctx: PageTextContext = {
+      publishCtx({
         pageNumber,
         pageEl,
         textLayerEl: textEl,
         pageText: text,
         itemOffsets,
         rotation: viewport.rotation,
-      }
-      ctxRef.current = ctx
-      registry.set(pageNumber, ctx)
-      setTextReady(true)
+      })
 
-      // Index on sight. Background indexing may not have reached this page yet,
-      // and Extract & Explain must work the instant a page is readable.
-      if (!(await pagesRepo.get(documentId, pageNumber))) {
-        await pagesRepo.put({
-          id: pageId(documentId, pageNumber),
-          documentId,
-          pageNumber,
-          text,
-          normalizedText: normalizeForSearch(text),
-          itemOffsets,
-          width: base.width,
-          height: base.height,
-          rotation: base.rotation,
-          hasTextLayer: text.trim().length > 0,
-          textSource: text.trim().length > 0 ? 'embedded' : 'none',
-          indexedAt: Date.now(),
-        })
+      // Index on sight, and correct a stale "image-only" row when embedded text
+      // is actually present (import can race ahead of a failed extract).
+      const next = {
+        id: pageId(documentId, pageNumber),
+        documentId,
+        pageNumber,
+        text,
+        normalizedText: normalizeForSearch(text),
+        itemOffsets,
+        width: base.width,
+        height: base.height,
+        rotation: base.rotation,
+        hasTextLayer: hasEmbedded,
+        textSource: (hasEmbedded
+          ? 'embedded'
+          : stored?.textSource === 'ocr'
+            ? 'ocr'
+            : 'none') satisfies TextSource as TextSource,
+        indexedAt: Date.now(),
+        ocrWords: hasEmbedded ? undefined : stored?.ocrWords,
+      } satisfies PageRecord
+      if (!stored || (hasEmbedded && (!stored.hasTextLayer || stored.textSource !== 'embedded'))) {
+        await pagesRepo.put(next)
+      } else if (!stored.hasTextLayer && !hasEmbedded && stored.textSource !== 'ocr') {
+        // Keep the empty marker so the status bar can offer OCR.
+        if (stored.textSource !== 'none') await pagesRepo.put({ ...stored, textSource: 'none' })
       }
     })()
 
@@ -145,11 +186,9 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       cancelled = true
       renderTask?.cancel()
       textLayer?.cancel()
-      registry.set(pageNumber, null)
-      ctxRef.current = null
-      setTextReady(false)
+      publishCtx(null)
     }
-  }, [pdf, pageNumber, width, visible, documentId, registry])
+  }, [pdf, pageNumber, width, visible, documentId, publishCtx, pageRecord?.textSource, pageRecord?.indexedAt])
 
   // ── Annotations on this page ──────────────────────────────────────────────
   const resolved = useLiveQuery(
@@ -168,15 +207,12 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
           : []
       return {
         annotation,
-        // Live rects are always preferred: they are correct for the current
-        // zoom. Stored rects are the fallback for pages with no text layer.
         rects: live.length ? live : resolution.rects,
         degraded: resolution.confidence < 0.8,
       }
     })
   }, [resolved, textReady])
 
-  // ── Pulse when a note jumps to its source ─────────────────────────────────
   const [pulseId, setPulseId] = useState<string | null>(null)
   useEffect(() => {
     if (!jumpRequest) return
@@ -186,7 +222,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
     return () => clearTimeout(timer)
   }, [jumpRequest, highlights])
 
-  // ── Selection + highlight hit-testing ─────────────────────────────────────
   const handlePointerUp = useCallback(
     (event: React.PointerEvent) => {
       const ctx = ctxRef.current
@@ -209,8 +244,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         }
       }
 
-      // A plain click: did it land on a highlight? (§9 — clicking a highlighted
-      // passage reveals the notes written about it.)
       const pageEl = pageRef.current
       if (!pageEl) return
       const box = pageEl.getBoundingClientRect()
@@ -232,6 +265,23 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
     [documentId, bookId, highlights, setSelection, setActiveAnnotation, requestReveal],
   )
 
+  // While dragging, mark the layer so pdf.js CSS expands selection through gaps.
+  useEffect(() => {
+    const el = pageRef.current
+    if (!el) return
+    const onDown = () => el.classList.add('selecting')
+    const onUp = () => el.classList.remove('selecting')
+    el.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [])
+
+  const ocrWords = pageRecord?.ocrWords ?? []
+  const showOcr = useOcrOverlay && ocrWords.length > 0 && pageRecord?.textSource === 'ocr'
+
   return (
     <div
       ref={pageRef}
@@ -248,8 +298,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
             <div
               key={`${annotation.id}:${i}`}
               className={[
-                // A snipped region is outlined, not filled: it marks where a
-                // screenshot came from rather than marking up the text (§D12).
                 annotation.kind === 'capture' ? 'hl-capture-region' : 'hl',
                 annotation.kind === 'capture' ? '' : `hl-${annotation.color}`,
                 activeAnnotationId === annotation.id ? 'hl-active' : '',
@@ -269,7 +317,18 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         )}
       </div>
 
-      <div ref={textLayerRef} className="textLayer" />
+      <div ref={textLayerRef} className="textLayer" hidden={showOcr} />
+
+      {showOcr && (
+        <OcrTextLayer
+          words={ocrWords}
+          pageText={pageRecord?.text ?? ''}
+          itemOffsets={pageRecord?.itemOffsets ?? []}
+          pageNumber={pageNumber}
+          pageEl={pageRef.current}
+          onReady={publishCtx}
+        />
+      )}
 
       {!visible && (
         <div className="text-ink-faint absolute inset-0 flex items-center justify-center text-xs">

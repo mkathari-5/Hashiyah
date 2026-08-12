@@ -49,9 +49,17 @@ export function StatusBar() {
         </>
       )}
 
-      {noTextLayer && (
-        <span className="text-hl-rose" title="This page is an image. Text selection needs OCR, which is not in this release.">
-          Image-only page — no selectable text
+      {noTextLayer && pageOnScreen?.textSource !== 'ocr' && (
+        <span
+          className="text-hl-rose"
+          title="This page has no embedded text. Use Recognise text in the reader to run local OCR."
+        >
+          Image-only page
+        </span>
+      )}
+      {pageOnScreen?.textSource === 'ocr' && pageOnScreen.hasTextLayer && (
+        <span className="text-ink-muted" title="Text on this page was recognised locally (Tesseract). Accuracy varies.">
+          OCR text
         </span>
       )}
 

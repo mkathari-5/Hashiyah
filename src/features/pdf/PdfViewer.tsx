@@ -2,14 +2,17 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLiveQuery } from 'dexie-react-hooks'
 import { booksRepo } from '@/db/repos/library'
 import { anchorsRepo } from '@/db/repos/annotations'
+import { pagesRepo } from '@/db/repos/documents'
 import { PdfPage, type PageContextRegistry } from '@/features/pdf/PdfPage'
 import { SelectionMenu } from '@/features/pdf/SelectionMenu'
 import { SnipOverlay } from '@/features/pdf/SnipOverlay'
 import { usePdfDocument } from '@/features/pdf/usePdfDocument'
+import { isImageOnlyPage, ocrPdfPage } from '@/services/ocr/OcrService'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { PageTextContext } from '@/services/annotations/selection'
 import { Icon } from '@/features/shell/Icon'
 import { displayTitle, secondaryTitle } from '@/lib/bookTitle'
+import type { PDFDocumentProxy } from '@/services/pdf/pdfjs'
 
 const GAP = 20
 const HORIZONTAL_PADDING = 48
@@ -236,6 +239,10 @@ export function PdfViewer() {
         snipActive={snipMode !== null}
       />
 
+      {documentId && (
+        <OcrBanner pdf={handle.pdf} documentId={documentId} pageNumber={currentPage} />
+      )}
+
       <div
         ref={scrollRef}
         onScroll={onScroll}
@@ -420,6 +427,53 @@ function IconButton({
     >
       {children}
     </button>
+  )
+}
+
+/** Quiet on-demand OCR entry for genuinely image-only pages (§G1C). */
+function OcrBanner({
+  pdf,
+  documentId,
+  pageNumber,
+}: {
+  pdf: PDFDocumentProxy
+  documentId: string
+  pageNumber: number
+}) {
+  const page = useLiveQuery(() => pagesRepo.get(documentId, pageNumber), [documentId, pageNumber])
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+
+  if (!isImageOnlyPage(page)) return null
+  if (page?.textSource === 'ocr' && page.hasTextLayer) return null
+
+  return (
+    <div className="ocr-banner">
+      <span className="ocr-banner-label">Image-only page</span>
+      <span className="ocr-banner-hint">
+        {busy
+          ? `Recognising text… ${Math.round(progress * 100)}%`
+          : 'No selectable text layer — run OCR on this page.'}
+      </span>
+      <button
+        type="button"
+        disabled={busy}
+        className="ocr-banner-action"
+        onClick={() => {
+          setBusy(true)
+          setError(null)
+          void ocrPdfPage(pdf, documentId, pageNumber, (p) => setProgress(p.progress))
+            .catch((err: unknown) => {
+              setError(err instanceof Error ? err.message : 'OCR failed')
+            })
+            .finally(() => setBusy(false))
+        }}
+      >
+        {busy ? 'Working…' : 'Recognise text'}
+      </button>
+      {error && <span className="ocr-banner-error">{error}</span>}
+    </div>
   )
 }
 

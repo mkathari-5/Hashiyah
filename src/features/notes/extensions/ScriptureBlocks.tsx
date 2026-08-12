@@ -1,24 +1,14 @@
 import { Node, mergeAttributes } from '@tiptap/core'
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { useState } from 'react'
+import { QURAN_TRANSLATION_ID, QURAN_TRANSLATION_LABEL } from '@/services/quran/QuranIndex'
 
 /**
- * Qur'ān and Ḥadīth blocks (§14, §15).
+ * Qur'ān and Ḥadīth blocks.
  *
- * Both follow the same shape: an editable Arabic body (the ProseMirror content)
- * plus a small strip of *metadata* held as node attributes — sūrah and āyah, or
- * narrator, collection and grading.
- *
- * Two deliberate constraints:
- *
- *  - The Arabic body is ordinary editable content, never a value the app
- *    reformats. Nothing here normalises, re-spaces or "corrects" what is typed.
- *    §57: source text is not ours to rewrite.
- *
- *  - Every metadata field is free text entered by the user and is left empty by
- *    default. The app does not look up sūrah names, infer āyah numbers or
- *    supply gradings, because inventing a reference is far worse than having
- *    none (§24).
+ * Qurʾān insertions from the picker carry corpus metadata (sūrah / āyah /
+ * translation id). Legacy free-text blocks remain readable. Default appearance
+ * is compact — an āyah is usually supporting evidence, not a poster.
  */
 
 interface ScriptureAttrs {
@@ -27,37 +17,49 @@ interface ScriptureAttrs {
   narrator: string
   collection: string
   grading: string
+  surah: number | null
+  ayahStart: number | null
+  ayahEnd: number | null
+  displayMode: 'compact' | 'display'
+  translationId: string
 }
 
-const attrDef = (name: keyof ScriptureAttrs) => ({
-  default: '',
-  parseHTML: (el: HTMLElement) => el.getAttribute(`data-${name}`) ?? '',
-  renderHTML: (attrs: Record<string, unknown>) =>
-    attrs[name] ? { [`data-${name}`]: attrs[name] as string } : {},
+const attrDef = (name: keyof ScriptureAttrs, fallback: string | number | null = '') => ({
+  default: fallback,
+  parseHTML: (el: HTMLElement) => {
+    const raw = el.getAttribute(`data-${String(name).replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`)
+    if (raw == null) return fallback
+    if (typeof fallback === 'number' || fallback === null) {
+      if (raw === '') return null
+      const n = Number(raw)
+      return Number.isFinite(n) ? n : fallback
+    }
+    return raw
+  },
+  renderHTML: (attrs: Record<string, unknown>) => {
+    const value = attrs[name]
+    if (value == null || value === '') return {}
+    const key = `data-${String(name).replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)}`
+    return { [key]: String(value) }
+  },
 })
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 function MetaField({
   value,
   placeholder,
   onChange,
   width = '9rem',
-  rtl,
 }: {
   value: string
   placeholder: string
   onChange: (value: string) => void
   width?: string
-  rtl?: boolean
 }) {
   return (
     <input
       value={value}
       placeholder={placeholder}
-      dir={rtl ? 'rtl' : undefined}
       onChange={(e) => onChange(e.target.value)}
-      // Keeps ProseMirror from treating typing here as document editing.
       onKeyDown={(e) => e.stopPropagation()}
       className="scripture-meta-input"
       style={{ width }}
@@ -65,99 +67,152 @@ function MetaField({
   )
 }
 
-function ScriptureView({ node, updateAttributes, extension }: NodeViewProps) {
+function QuranView({ node, updateAttributes }: NodeViewProps) {
   const attrs = node.attrs as unknown as ScriptureAttrs
-  const isQuran = extension.name === 'quranBlock'
-  const [showTranslation, setShowTranslation] = useState(
-    () => attrs.translation.trim().length > 0,
-  )
+  const mode = attrs.displayMode === 'display' ? 'display' : 'compact'
+  const hasCorpus = attrs.surah != null && attrs.ayahStart != null
+  const [editing, setEditing] = useState(!hasCorpus && !attrs.reference && !attrs.translation)
+
+  const refLabel =
+    attrs.reference ||
+    (hasCorpus
+      ? `${attrs.surah}:${attrs.ayahStart}${
+          attrs.ayahEnd && attrs.ayahEnd !== attrs.ayahStart ? `–${attrs.ayahEnd}` : ''
+        }`
+      : '')
 
   return (
-    <NodeViewWrapper className={`scripture ${isQuran ? 'scripture-quran' : 'scripture-hadith'}`}>
+    <NodeViewWrapper
+      className={`scripture scripture-quran is-${mode}`}
+      data-display-mode={mode}
+    >
       <div className="scripture-rule" contentEditable={false} aria-hidden />
 
-      <div className="scripture-head" contentEditable={false}>
-        <span className="scripture-kind">{isQuran ? "Qur'ān" : 'Ḥadīth'}</span>
-        {isQuran && <span className="scripture-intro font-arabic">قال الله تعالى</span>}
-      </div>
-
-      {/* The Arabic body: real editable content, untouched by the app. */}
       <NodeViewContent className="scripture-body font-arabic" dir="rtl" />
 
-      <div className="scripture-meta" contentEditable={false}>
-        {isQuran ? (
-          <MetaField
-            value={attrs.reference}
-            placeholder="Sūrah : āyah"
-            onChange={(reference) => updateAttributes({ reference })}
-            width="11rem"
-          />
-        ) : (
-          <>
-            <MetaField
-              value={attrs.narrator}
-              placeholder="Narrator"
-              onChange={(narrator) => updateAttributes({ narrator })}
-            />
-            <MetaField
-              value={attrs.collection}
-              placeholder="Collection & number"
-              onChange={(collection) => updateAttributes({ collection })}
-              width="12rem"
-            />
-            <MetaField
-              value={attrs.grading}
-              placeholder="Grading"
-              onChange={(grading) => updateAttributes({ grading })}
-              width="7rem"
-            />
-          </>
-        )}
+      {attrs.translation.trim().length > 0 && (
+        <p className="scripture-translation-line" contentEditable={false}>
+          {attrs.translation}
+        </p>
+      )}
 
+      <div className="scripture-foot" contentEditable={false}>
+        <span className="scripture-ref">{refLabel}</span>
+        {attrs.translationId && (
+          <span className="scripture-tr-id" title={QURAN_TRANSLATION_LABEL}>
+            {attrs.translationId === QURAN_TRANSLATION_ID ? 'Saheeh Int.' : attrs.translationId}
+          </span>
+        )}
         <button
           type="button"
-          onClick={() => setShowTranslation((v) => !v)}
-          className="scripture-toggle"
+          className="scripture-mode"
+          title={mode === 'compact' ? 'Emphasise this āyah' : 'Use compact quotation'}
+          onClick={() =>
+            updateAttributes({ displayMode: mode === 'compact' ? 'display' : 'compact' })
+          }
         >
-          {showTranslation ? 'Hide translation' : 'Add translation'}
+          {mode === 'compact' ? 'Display' : 'Compact'}
         </button>
+        {!hasCorpus && (
+          <button type="button" className="scripture-mode" onClick={() => setEditing((v) => !v)}>
+            {editing ? 'Done' : 'Edit'}
+          </button>
+        )}
       </div>
 
-      {showTranslation && (
-        <textarea
-          contentEditable={false}
-          value={attrs.translation}
-          placeholder="Translation — your own wording"
-          onChange={(e) => updateAttributes({ translation: e.target.value })}
-          onKeyDown={(e) => e.stopPropagation()}
-          rows={2}
-          className="scripture-translation"
-        />
+      {editing && (
+        <div className="scripture-meta" contentEditable={false}>
+          <MetaField
+            value={attrs.reference}
+            placeholder="Sūrah · reference"
+            onChange={(reference) => updateAttributes({ reference })}
+            width="12rem"
+          />
+          <textarea
+            value={attrs.translation}
+            placeholder="Translation"
+            onChange={(e) => updateAttributes({ translation: e.target.value })}
+            onKeyDown={(e) => e.stopPropagation()}
+            rows={2}
+            className="scripture-translation"
+          />
+        </div>
       )}
     </NodeViewWrapper>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+function HadithView({ node, updateAttributes }: NodeViewProps) {
+  const attrs = node.attrs as unknown as ScriptureAttrs
+  const [showMeta, setShowMeta] = useState(
+    () => !attrs.narrator && !attrs.collection && !attrs.grading && !attrs.translation,
+  )
 
-const base = {
-  group: 'block',
-  content: 'inline*',
-  defining: true,
+  return (
+    <NodeViewWrapper className="scripture scripture-hadith is-compact">
+      <div className="scripture-rule" contentEditable={false} aria-hidden />
 
-  addAttributes() {
-    return {
-      reference: attrDef('reference'),
-      translation: attrDef('translation'),
-      narrator: attrDef('narrator'),
-      collection: attrDef('collection'),
-      grading: attrDef('grading'),
-    }
-  },
+      <NodeViewContent className="scripture-body font-arabic" dir="rtl" />
 
-  addNodeView() {
-    return ReactNodeViewRenderer(ScriptureView)
-  },
+      {attrs.translation.trim().length > 0 && (
+        <p className="scripture-translation-line" contentEditable={false}>
+          {attrs.translation}
+        </p>
+      )}
+
+      <div className="scripture-foot" contentEditable={false}>
+        <span className="scripture-ref">
+          {[attrs.narrator, attrs.collection, attrs.grading].filter(Boolean).join(' · ') || 'Ḥadīth'}
+        </span>
+        <button type="button" className="scripture-mode" onClick={() => setShowMeta((v) => !v)}>
+          {showMeta ? 'Done' : 'Edit'}
+        </button>
+      </div>
+
+      {showMeta && (
+        <div className="scripture-meta" contentEditable={false}>
+          <MetaField
+            value={attrs.narrator}
+            placeholder="Narrator"
+            onChange={(narrator) => updateAttributes({ narrator })}
+          />
+          <MetaField
+            value={attrs.collection}
+            placeholder="Collection & number"
+            onChange={(collection) => updateAttributes({ collection })}
+            width="12rem"
+          />
+          <MetaField
+            value={attrs.grading}
+            placeholder="Grading"
+            onChange={(grading) => updateAttributes({ grading })}
+            width="7rem"
+          />
+          <textarea
+            value={attrs.translation}
+            placeholder="Translation / notes"
+            onChange={(e) => updateAttributes({ translation: e.target.value })}
+            onKeyDown={(e) => e.stopPropagation()}
+            rows={2}
+            className="scripture-translation"
+          />
+        </div>
+      )}
+    </NodeViewWrapper>
+  )
+}
+
+const quranAttrs = {
+  reference: attrDef('reference', ''),
+  translation: attrDef('translation', ''),
+  narrator: attrDef('narrator', ''),
+  collection: attrDef('collection', ''),
+  grading: attrDef('grading', ''),
+  surah: attrDef('surah', null),
+  ayahStart: attrDef('ayahStart', null),
+  ayahEnd: attrDef('ayahEnd', null),
+  displayMode: attrDef('displayMode', 'compact'),
+  translationId: attrDef('translationId', ''),
 }
 
 declare module '@tiptap/core' {
@@ -170,32 +225,58 @@ declare module '@tiptap/core' {
 }
 
 export const QuranBlock = Node.create({
-  ...base,
   name: 'quranBlock',
+  group: 'block',
+  content: 'inline*',
+  defining: true,
+
+  addAttributes() {
+    return quranAttrs
+  },
+
   parseHTML() {
     return [{ tag: 'div[data-quran-block]' }]
   },
   renderHTML({ HTMLAttributes }) {
     return ['div', mergeAttributes(HTMLAttributes, { 'data-quran-block': '' }), 0]
   },
+  addNodeView() {
+    return ReactNodeViewRenderer(QuranView)
+  },
   addCommands() {
     return {
       insertQuranBlock:
         () =>
         ({ commands }) =>
-          commands.insertContent({ type: 'quranBlock' }),
+          commands.insertContent({ type: 'quranBlock', attrs: { displayMode: 'compact' } }),
     }
   },
 })
 
 export const HadithBlock = Node.create({
-  ...base,
   name: 'hadithBlock',
+  group: 'block',
+  content: 'inline*',
+  defining: true,
+
+  addAttributes() {
+    return {
+      reference: attrDef('reference', ''),
+      translation: attrDef('translation', ''),
+      narrator: attrDef('narrator', ''),
+      collection: attrDef('collection', ''),
+      grading: attrDef('grading', ''),
+    }
+  },
+
   parseHTML() {
     return [{ tag: 'div[data-hadith-block]' }]
   },
   renderHTML({ HTMLAttributes }) {
     return ['div', mergeAttributes(HTMLAttributes, { 'data-hadith-block': '' }), 0]
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(HadithView)
   },
   addCommands() {
     return {

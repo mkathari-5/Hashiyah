@@ -118,6 +118,15 @@ export interface DocumentBlob {
   blob: Blob
 }
 
+/** Word geometry from OCR, normalised 0–1 against the PDF page box. */
+export interface OcrWordBox {
+  text: string
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface PageRecord {
   id: string // `${documentId}:${pageNumber}`
   documentId: string
@@ -134,6 +143,11 @@ export interface PageRecord {
   hasTextLayer: boolean
   textSource: TextSource
   indexedAt: number
+  /**
+   * Optional OCR word boxes (additive, unindexed). Present when `textSource`
+   * is `ocr` so a selectable overlay can be rebuilt without re-running OCR.
+   */
+  ocrWords?: OcrWordBox[]
 }
 
 export interface OutlineNode {

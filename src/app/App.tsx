@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@/features/shell/AppShell'
 import { bootstrapLibrary } from '@/services/library/bootstrap'
+import { preloadQuran } from '@/services/quran/QuranIndex'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import { useAppStore } from '@/state/useAppStore'
 
@@ -18,6 +19,7 @@ export function App() {
         // the next start finishes the job.
         await bootstrapLibrary()
         await useLibraryStore.getState().hydrate()
+        preloadQuran()
       } catch (error) {
         setFatal(
           error instanceof Error
