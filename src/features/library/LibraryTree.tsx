@@ -69,13 +69,27 @@ interface TreeProps {
    */
   outline?: OutlineEntry[]
   onOutlineJump?: (blockId: string) => void
+  /**
+   * §F.1 — Library Home owns the "empty library" copy. When true, this tree
+   * never paints its own empty/loading placeholder underneath that message.
+   */
+  suppressEmpty?: boolean
 }
 
 /** How many outline entries before folding the rest behind "More" (§E-3). */
 const OUTLINE_LIMIT = 8
 
-export function LibraryTree({ variant, onContextMenu, onAdd, outline, onOutlineJump }: TreeProps) {
-  const nodes = useLiveQuery(() => libraryRepo.all(), [], [])
+export function LibraryTree({
+  variant,
+  onContextMenu,
+  onAdd,
+  outline,
+  onOutlineJump,
+  suppressEmpty = false,
+}: TreeProps) {
+  // No default: undefined means the live query has not resolved yet, which is
+  // the only moment "being prepared" is an honest message (§F.1).
+  const nodes = useLiveQuery(() => libraryRepo.all(), [])
   const activeNodeId = useLibraryStore((s) => s.activeNodeId)
   const openNode = useLibraryStore((s) => s.openNode)
   const toggleExpanded = useLibraryStore((s) => s.toggleExpanded)
@@ -85,7 +99,7 @@ export function LibraryTree({ variant, onContextMenu, onAdd, outline, onOutlineJ
 
   const byParent = useMemo(() => {
     const map = new Map<string | null, LibraryNode[]>()
-    for (const node of nodes) {
+    for (const node of nodes ?? []) {
       const list = map.get(node.parentId) ?? []
       list.push(node)
       map.set(node.parentId, list)
@@ -96,7 +110,7 @@ export function LibraryTree({ variant, onContextMenu, onAdd, outline, onOutlineJ
 
   const handleDrop = useCallback(
     async (target: LibraryNode) => {
-      if (!dragId || dragId === target.id) return
+      if (!dragId || dragId === target.id || !nodes) return
       const dragged = nodes.find((n) => n.id === dragId)
       if (!dragged) return
       // Dropping onto a container files it inside; onto a leaf, beside it.
@@ -217,13 +231,16 @@ export function LibraryTree({ variant, onContextMenu, onAdd, outline, onOutlineJ
 
   const roots = byParent.get(null) ?? []
 
-  if (roots.length === 0) {
+  // Loading vs empty must not share a sentence (§F.1). "Being prepared" is only
+  // honest while the live query has not resolved; a resolved empty library is
+  // silent here so Library Home can own the empty-state copy.
+  if (nodes === undefined) {
+    if (suppressEmpty) return null
     return (
-      <p className="text-ink-faint px-3 py-4 text-xs">
-        Your library is being prepared…
-      </p>
+      <p className="text-ink-faint px-3 py-4 text-xs">Your library is being prepared…</p>
     )
   }
+  if (roots.length === 0) return null
 
   return (
     <ul className={`lib-tree lib-tree-${variant}`}>{roots.map((node) => renderNode(node, 0))}</ul>

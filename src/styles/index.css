@@ -2246,6 +2246,13 @@ svg.block-menu-icon {
   color: var(--color-ink);
   box-shadow: inset 0 -1.5px 0 var(--color-accent);
 }
+.notes-tab .notes-tab-title {
+  display: inline-flex;
+  max-width: 100%;
+  font-size: inherit;
+  font-weight: inherit;
+  overflow: hidden;
+}
 
 /* Focus mode: the header sits over the same measure as the manuscript, so the
    title is above the text it names rather than off at the window edge. */

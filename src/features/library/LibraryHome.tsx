@@ -18,16 +18,19 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
   const openNode = useLibraryStore((s) => s.openNode)
   const recent = useLiveQuery(() => libraryRepo.recent(5), [], [])
   const favourites = useLiveQuery(() => libraryRepo.favourites(), [], [])
-  const allNodes = useLiveQuery(() => libraryRepo.all(), [], [])
+  // Undefined until resolved — so "empty" is not painted during the first tick.
+  const allNodes = useLiveQuery(() => libraryRepo.all(), [])
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
 
   const continueWith = recent[0]
+  const libraryReady = allNodes !== undefined
+  const libraryEmpty = libraryReady && allNodes.length === 0
 
   /**
    * "Chapter 3" on its own tells you nothing on the way back into the app, so
    * everything outside the tree carries the book it belongs to (§F5).
    */
-  const byId = new Map(allNodes.map((n) => [n.id, n]))
+  const byId = new Map((allNodes ?? []).map((n) => [n.id, n]))
   const trail = (node: LibraryNode): string[] => {
     const out: string[] = []
     let parent = node.parentId ? byId.get(node.parentId) : undefined
@@ -121,7 +124,10 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
 
         <section className="library-section">
           <h2 className="library-section-title">Library</h2>
-          {allNodes.length === 0 && (
+          {!libraryReady && (
+            <p className="text-ink-faint py-2 text-xs">Your library is being prepared…</p>
+          )}
+          {libraryEmpty && (
             <div className="empty-state">
               <p className="empty-state-line">Your library is empty.</p>
               <p className="empty-state-hint">
@@ -134,6 +140,7 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
           )}
           <LibraryTree
             variant="home"
+            suppressEmpty
             onAdd={(node) => void addChild(node)}
             onContextMenu={(node, event) => setMenu({ node, x: event.clientX, y: event.clientY })}
           />

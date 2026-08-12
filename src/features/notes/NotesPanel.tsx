@@ -62,15 +62,22 @@ export function NotesPanel() {
     [book?.subjectId],
   )
   /**
-   * §F25 — a chapter note's visible identity is the library node's title, not
-   * whatever string happens to sit on the note row. Rendering through NodeTitle
-   * also keeps mixed English/Arabic titles correctly isolated.
+   * §F25 / §F.1 — library ownership is authoritative for identity and lifecycle.
+   * One live map covers the heading, every tab, and the menu, so a strip of
+   * chapter tabs does not fire one Dexie lookup apiece.
    */
-  const libraryOwner = useLiveQuery(
-    () => (activeNoteId ? libraryRepo.owner(activeNoteId) : undefined),
-    [activeNoteId],
-  )
+  const ownersByNoteId = useLiveQuery(async () => {
+    const nodes = await libraryRepo.all()
+    const map = new Map<string, (typeof nodes)[number]>()
+    for (const node of nodes) {
+      if (node.noteId) map.set(node.noteId, node)
+    }
+    return map
+  }, [])
   const noteList = useMemo(() => notes ?? [], [notes])
+  const libraryOwner = activeNoteId ? ownersByNoteId?.get(activeNoteId) : undefined
+  /** Library-owned notes are renamed/deleted from the Library, never here. */
+  const canManageNote = !libraryOwner
 
   useEffect(() => {
     if (revealRequest && revealRequest.noteId !== activeNoteId) setActiveNote(revealRequest.noteId)
@@ -211,17 +218,23 @@ export function NotesPanel() {
          */}
         {noteList.length > 1 && !revisionMode && (
           <div className="notes-tabs scrollbar-none">
-            {noteList.map((note) => (
-              <button
-                key={note.id}
-                ref={note.id === activeNoteId ? activeTabRef : undefined}
-                onClick={() => setActiveNote(note.id)}
-                className={`notes-tab ${note.id === activeNoteId ? 'is-active' : ''}`}
-                dir="auto"
-              >
-                {note.title}
-              </button>
-            ))}
+            {noteList.map((note) => {
+              const owner = ownersByNoteId?.get(note.id)
+              return (
+                <button
+                  key={note.id}
+                  ref={note.id === activeNoteId ? activeTabRef : undefined}
+                  onClick={() => setActiveNote(note.id)}
+                  className={`notes-tab ${note.id === activeNoteId ? 'is-active' : ''}`}
+                >
+                  {owner ? (
+                    <NodeTitle node={owner} className="notes-tab-title" />
+                  ) : (
+                    <span dir="auto">{note.title}</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
         )}
 
@@ -257,7 +270,7 @@ export function NotesPanel() {
                 setMenuOpen(false)
               }}
             />
-            <div className="block-menu-sep" />
+            {(bookId || canManageNote) && <div className="block-menu-sep" />}
             {bookId && (
               <MenuItem
                 label="New note"
@@ -267,26 +280,30 @@ export function NotesPanel() {
                 }}
               />
             )}
-            <MenuItem
-              label="Rename note"
-              onClick={async () => {
-                setMenuOpen(false)
-                if (!active) return
-                const next = window.prompt('Note title', active.title)?.trim()
-                if (next) await notesRepo.update(active.id, { title: next })
-              }}
-            />
-            <MenuItem
-              label="Delete note"
-              danger
-              onClick={async () => {
-                setMenuOpen(false)
-                if (!active) return
-                if (!window.confirm(`Delete “${active.title}”? This cannot be undone.`)) return
-                await notesRepo.remove(active.id)
-                setActiveNote(null)
-              }}
-            />
+            {canManageNote && (
+              <MenuItem
+                label="Rename note"
+                onClick={async () => {
+                  setMenuOpen(false)
+                  if (!active) return
+                  const next = window.prompt('Note title', active.title)?.trim()
+                  if (next) await notesRepo.update(active.id, { title: next })
+                }}
+              />
+            )}
+            {canManageNote && (
+              <MenuItem
+                label="Delete note"
+                danger
+                onClick={async () => {
+                  setMenuOpen(false)
+                  if (!active) return
+                  if (!window.confirm(`Delete “${active.title}”? This cannot be undone.`)) return
+                  await notesRepo.remove(active.id)
+                  setActiveNote(null)
+                }}
+              />
+            )}
           </div>
         )}
       </header>
