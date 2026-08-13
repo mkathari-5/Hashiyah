@@ -190,18 +190,28 @@ export function LibraryTree({
     }
 
     if (!value) {
-      if (opts.removeIfEmpty && draftIds.current.has(node.id)) {
+      /**
+       * An unnamed draft never survives losing focus.
+       *
+       * Leaving it behind was what littered the tree with "Untitled" rows:
+       * press Enter to line up the next item, change your mind, click away —
+       * and a permanent blank node stayed in the library. Discarding is safe
+       * precisely because it is still a draft: it has never carried a title,
+       * so there is nothing of the reader's to lose. A node that *was* named
+       * is not a draft and is never touched here.
+       */
+      if (draftIds.current.has(node.id) && !node.arabicTitle) {
         draftIds.current.delete(node.id)
         const prevId = previousSibling(node, byParent.get(node.parentId) ?? [])?.id
         await libraryRepo.remove(node.id, { deleteNotes: true })
         setEditingId(null)
-        if (prevId) {
+        // Backspace walks back up the list; blur simply lets go.
+        if (opts.removeIfEmpty && prevId) {
           const prev = byId.get(prevId)
           if (prev) beginEdit(prev)
         }
         return
       }
-      // Blur / Enter on empty: leave the blank row; do not auto-delete.
       setEditingId(null)
       return
     }
@@ -398,7 +408,16 @@ export function LibraryTree({
               }}
               title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Untitled'}
             >
-              <Icon name={ICONS[node.type]} className="lib-icon" />
+              {/**
+               * Only books carry an icon.
+               *
+               * Sciences had one, books had another and study items had none,
+               * so the left edge came out ragged and the glyphs said nothing
+               * the indentation was not already saying. Depth is the hierarchy;
+               * the one mark left is the thing you actually scan for — where a
+               * book begins.
+               */}
+              {node.type === 'book' && <Icon name={ICONS.book} className="lib-icon" />}
               <NodeTitle node={node} />
               {node.favorite && <Icon name="star" className="lib-star" />}
             </button>
@@ -456,7 +475,17 @@ export function LibraryTree({
         {expanded && (
           <ul>
             {children.map((child) => renderNode(child, depth + 1))}
-            {canAdd && editingId === null && (
+            {/**
+             * Only where a branch would otherwise look dead.
+             *
+             * A standing "New item" row under every container turned a small
+             * tree into a third clutter: three of them were visible at once in
+             * a nine-row library. Adding is the hover `+` on the row itself
+             * (§18); this row exists solely so an expanded, empty container
+             * still offers somewhere to start, and it disappears the moment
+             * there is anything inside.
+             */}
+            {canAdd && children.length === 0 && editingId === null && (
               <li>
                 <button
                   type="button"

@@ -117,7 +117,9 @@ describe('LibraryTree outline editing', () => {
     render(<LibraryTree variant="home" />)
 
     await waitFor(() => expect(screen.getByText('Kept')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /New item/i }))
+    // The composer row only appears under an *empty* container; once a branch
+    // has content, adding is the row's own hover `+`.
+    fireEvent.click(screen.getByRole('button', { name: /Add under Kitāb at-Tawḥīd/i }))
     const input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
       fireEvent.keyDown(input, { key: 'Backspace' })
