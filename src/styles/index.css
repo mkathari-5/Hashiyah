@@ -1863,6 +1863,9 @@ svg.block-menu-icon {
   overflow: hidden;
   white-space: nowrap;
   font-size: 12.5px;
+  /* One line-height for the row whichever script it turns out to hold, so the
+     tree keeps an even rhythm and stays scannable. */
+  line-height: 1.45;
 }
 
 /**
@@ -1883,8 +1886,18 @@ svg.block-menu-icon {
   color: var(--color-ink-faint);
   flex-shrink: 0;
 }
+/**
+ * Arabic in the library is a *label*, not prose.
+ *
+ * The global `.font-arabic` rule gives Arabic a 2.05 line-height, which is
+ * right for reading a paragraph of it in a note and wrong for a one-line row:
+ * it was making every Arabic chapter 37px tall against 25.6px for a Latin one,
+ * so a tree of mostly-Arabic titles came out visibly ragged and 45% longer
+ * than it needed to be. Row rhythm has to be even for the hierarchy to scan.
+ */
 .lib-title-arabic {
-  font-size: 1.15em;
+  font-size: 1.12em;
+  line-height: 1.4;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
