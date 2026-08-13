@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import {
+  ITEM_LABEL,
   canNestUnder,
+  canSitAtRoot,
   childTypeFor,
   isBlankTitle,
   isContainerType,
@@ -60,8 +62,6 @@ export function NodeTitle({
 interface TreeProps {
   variant: 'home' | 'sidebar'
   onContextMenu?: (node: LibraryNode, event: React.MouseEvent) => void
-  /** Optional external add — prefer the tree's own inline create. */
-  onAdd?: (node: LibraryNode) => void
   outline?: OutlineEntry[]
   onOutlineJump?: (blockId: string) => void
   suppressEmpty?: boolean
@@ -75,7 +75,6 @@ const OUTLINE_LIMIT = 8
 export function LibraryTree({
   variant,
   onContextMenu,
-  onAdd,
   outline,
   onOutlineJump,
   suppressEmpty = false,
@@ -237,8 +236,8 @@ export function LibraryTree({
     if (grandParentId !== null) {
       const grand = await libraryRepo.get(grandParentId)
       if (!grand || !canNestUnder(node.type, grand.type)) return
-    } else if (!(node.type === 'science' || node.type === 'folder' || node.type === 'book')) {
-      // Only top-level-capable types may sit at the root.
+    } else if (!canSitAtRoot(node.type)) {
+      // A study item must never escape into the root; it belongs to a book.
       return
     }
     const uncleSiblings = await libraryRepo.children(grandParentId)
@@ -251,7 +250,10 @@ export function LibraryTree({
       if (!dragId || dragId === target.id || !nodes) return
       const dragged = nodes.find((n) => n.id === dragId)
       if (!dragged) return
-      if (isContainerType(target.type) && canNestUnder(dragged.type, target.type)) {
+      // Nest wherever the structure allows, not only under the four organiser
+      // types. Gating this on `isContainerType` meant a drop onto a study item
+      // always landed *beside* it, so drag and drop could never build depth.
+      if (canNestUnder(dragged.type, target.type)) {
         const children = byParent.get(target.id) ?? []
         await libraryRepo.move(dragId, target.id, children.length)
         await libraryRepo.update(target.id, { collapsed: false })
@@ -410,10 +412,9 @@ export function LibraryTree({
               title="Add"
               onClick={(e) => {
                 e.stopPropagation()
-                if (onAdd && !isContainerType(node.type)) {
-                  onAdd(node)
-                  return
-                }
+                // Always inline. Routing study items through `onAdd` sent them
+                // back to a browser prompt, which is exactly the workflow the
+                // outline replaces.
                 void createChild(node)
               }}
             >
@@ -466,7 +467,10 @@ export function LibraryTree({
                   <span className="lib-composer-mark" aria-hidden>
                     +
                   </span>
-                  New {childTypeFor(node.type)}
+                  {/* Never "New chapter": below a book everything is just an
+                      item, and naming the level is the mental model this
+                      outline is meant to remove. */}
+                  {childTypeFor(node.type) === 'book' ? 'New book' : `New ${ITEM_LABEL}`}
                 </button>
               </li>
             )}

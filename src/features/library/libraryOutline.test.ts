@@ -29,12 +29,19 @@ describe('libraryOutline rules', () => {
     expect(childTypeFor('book')).toBe('chapter')
     expect(childTypeFor('course')).toBe('chapter')
     expect(childTypeFor('chapter')).toBe('chapter')
-    expect(childTypeFor('notes')).toBeNull()
+    // `lesson` and `notes` used to return null, which made them dead ends with
+    // no `+` and no composer. Below a book nothing is a dead end any more.
+    expect(childTypeFor('lesson')).toBe('chapter')
+    expect(childTypeFor('notes')).toBe('chapter')
   })
 
   it('allows Tab-indent only when the structure is valid', () => {
     expect(canNestUnder('chapter', 'book')).toBe(true)
     expect(canNestUnder('chapter', 'chapter')).toBe(true)
+    // Previously dead ends; now ordinary study items like any other.
+    expect(canNestUnder('chapter', 'lesson')).toBe(true)
+    expect(canNestUnder('chapter', 'notes')).toBe(true)
+    // Structure above a book still means something.
     expect(canNestUnder('book', 'chapter')).toBe(false)
     expect(canNestUnder('science', 'book')).toBe(false)
   })

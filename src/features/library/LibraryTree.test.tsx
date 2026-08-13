@@ -1,4 +1,4 @@
-import Dexie from 'dexie'
+﻿import Dexie from 'dexie'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { db } from '@/db/db'
@@ -36,7 +36,7 @@ describe('LibraryTree outline editing', () => {
 
     await waitFor(() => expect(screen.getByText('Kitāb at-Tawḥīd')).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole('button', { name: /New chapter/i }))
+    fireEvent.click(screen.getByRole('button', { name: /New item/i }))
 
     let input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
@@ -117,7 +117,7 @@ describe('LibraryTree outline editing', () => {
     render(<LibraryTree variant="home" />)
 
     await waitFor(() => expect(screen.getByText('Kept')).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: /New chapter/i }))
+    fireEvent.click(screen.getByRole('button', { name: /New item/i }))
     const input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
       fireEvent.keyDown(input, { key: 'Backspace' })

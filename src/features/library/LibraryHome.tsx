@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/db'
 import { libraryRepo } from '@/db/repos/libraryTree'
@@ -121,7 +121,7 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
             <div className="empty-state">
               <p className="empty-state-line">Your library is empty.</p>
               <p className="empty-state-hint">
-                Import a book to begin, then add the chapters you are studying underneath it.
+                Import a book to begin, then build your study outline underneath it.
               </p>
               <button onClick={onImport} className="empty-state-action">
                 Import a PDF
