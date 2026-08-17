@@ -565,9 +565,15 @@
 }
 
 /* Placeholder on the currently focused empty block only — a page full of grey
-   prompts is noise. */
-.ProseMirror .is-empty.has-focus::before,
-.ProseMirror > .is-editor-empty:first-child::before {
+   prompts is noise.
+
+   `[data-toggle]` is excluded on purpose. A toggle row is a grid, so a
+   `::before` on it is not a floated hint but a *grid item*, auto-placed in the
+   first column — the same cell the arrow occupies, which is how placeholder
+   text ended up sitting under the chevron. Titles get their own rule below,
+   inside the title element where it belongs. */
+.ProseMirror .is-empty.has-focus:not([data-toggle])::before,
+.ProseMirror > .is-editor-empty:first-child:not([data-toggle])::before {
   content: attr(data-placeholder);
   float: inline-start;
   height: 0;
@@ -669,6 +675,22 @@
   line-height: 1.45;
   padding-block: 0.02em;
   cursor: text;
+}
+
+/* The title's prompt.
+
+   It lives on the title element, which is the grid's second column, so it can
+   only ever appear *beside* the arrow. Tiptap decorates the block holding the
+   caret, so this is a hint for the toggle being written, not a grey word on
+   every unnamed section — and it is a pseudo-element, so it is never document
+   text, never saved, and gone the instant a letter is typed. */
+.ProseMirror [data-toggle-summary].is-empty::before {
+  content: attr(data-placeholder);
+  float: inline-start;
+  height: 0;
+  pointer-events: none;
+  user-select: none;
+  color: var(--color-ink-faint);
 }
 
 [data-toggle-content] {

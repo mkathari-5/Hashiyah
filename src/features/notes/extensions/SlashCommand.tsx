@@ -1,7 +1,8 @@
-import { Extension } from '@tiptap/core'
+import { Extension, type Range } from '@tiptap/core'
 import { PluginKey } from '@tiptap/pm/state'
 import Suggestion from '@tiptap/suggestion'
 import { ReactRenderer } from '@tiptap/react'
+import { flushSync } from 'react-dom'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import { filterBlocks, groupBlocks, type BlockDef } from '@/features/notes/blockCatalogue'
 import { useStudyStore } from '@/state/useStudyStore'
@@ -151,8 +152,31 @@ export const SlashCommand = Extension.create({
         startOfLine: false,
         items: ({ query }) =>
           filterBlocks(query, { hasPdfSelection: !!useStudyStore.getState().selection }),
+        /**
+         * Consume the whole `/query`, not the one React last painted.
+         *
+         * `range` here is captured by the closure the menu was *rendered* with,
+         * and Tiptap renders suggestion menus through React's portal registry —
+         * an ordinary state update, committed a frame after the document has
+         * already moved on. Type `/toggle` quickly and pick before that commit
+         * lands and the stale range covers only `/`, leaving `toggle` behind as
+         * literal text (§F17). The live plugin state is always the current one.
+         */
         command: ({ editor, range, props }) => {
-          editor.chain().focus().deleteRange(range).run()
+          const live = slashPluginKey.getState(editor.state) as { range?: Range } | undefined
+          const wipe = live?.range ?? range
+          // One chain: delete the live `/query` range, then run the catalogue
+          // command against the post-delete selection so insertToggle sees an
+          // empty paragraph rather than racing a second focus().
+          editor
+            .chain()
+            .focus()
+            .command(({ tr, dispatch }) => {
+              tr.deleteRange(wipe.from, wipe.to)
+              if (dispatch) dispatch(tr)
+              return true
+            })
+            .run()
           props.run(editor)
         },
         render: () => ({
@@ -169,7 +193,12 @@ export const SlashCommand = Extension.create({
             place(props.clientRect?.() ?? null)
           },
           onUpdate: (props) => {
-            renderer?.updateProps({ items: props.items, command: props.command })
+            // Paint the filtered list now rather than next frame: the reader
+            // clicks what they can see, so a menu one keystroke behind is a
+            // menu that runs the wrong block.
+            flushSync(() => {
+              renderer?.updateProps({ items: props.items, command: props.command })
+            })
             place(props.clientRect?.() ?? null)
           },
           onKeyDown: (props) => {

@@ -39,7 +39,13 @@ const AUTOSAVE_MS = 400
 /** Lesson mode saves harder — a dropped laptop lid mid-lesson costs more (§22). */
 const LESSON_AUTOSAVE_MS = 150
 
-const extensions = [
+/**
+ * The note editor's extension set.
+ *
+ * Exported so tests (and the toggle harness) can build an editor that behaves
+ * exactly like the real one, rather than a lookalike that drifts from it.
+ */
+export const noteExtensions = [
   StarterKit.configure({
     link: { openOnClick: false, autolink: true },
     heading: { levels: [1, 2, 3] },
@@ -66,7 +72,7 @@ const extensions = [
     includeChildren: true,
     placeholder: ({ node }) => {
       if (node.type.name === 'heading') return 'Heading'
-      if (node.type.name === 'toggleSummary') return 'Toggle title'
+      if (node.type.name === 'toggleSummary') return 'Toggle'
       if (node.type.name === 'quranBlock') return 'اكتب الآية هنا'
       if (node.type.name === 'hadithBlock') return 'اكتب متن الحديث هنا'
       return "Type '/' for blocks, or just start writing…"
@@ -150,7 +156,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const editor = useEditor({
-    extensions,
+    extensions: noteExtensions,
     content: emptyDoc(),
     autofocus: false,
     immediatelyRender: false,

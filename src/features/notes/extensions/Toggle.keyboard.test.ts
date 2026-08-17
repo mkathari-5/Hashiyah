@@ -5,12 +5,14 @@ import { TextSelection } from '@tiptap/pm/state'
 import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/extensions/Toggle'
 import {
   deleteEmptyToggle,
-  enterFromEmptyBody,
+  exitToggleBody,
   findToggle,
   insertSiblingToggle,
+  insertToggleAtCaret,
   isEmptyToggle,
   nestUnderPreviousToggle,
   outdentToggle,
+  wrapBlockInToggle,
 } from '@/features/notes/extensions/toggleOutline'
 
 /** Plain document rendering — no React node view noise in unit tests. */
@@ -82,7 +84,7 @@ describe('Toggle Notion-like keyboard flow', () => {
     editor.destroy()
   })
 
-  it('Enter on the empty last body paragraph creates the next toggle', () => {
+  it('Enter on the empty last body paragraph leaves the toggle', () => {
     const editor = makeEditor({
       type: 'doc',
       content: [emptyToggle('Q1')],
@@ -90,8 +92,111 @@ describe('Toggle Notion-like keyboard flow', () => {
     const toggle = editor.state.doc.child(0)
     const bodyPos = 1 + toggle.child(0).nodeSize + 1 + 1
     editor.commands.setTextSelection(bodyPos)
-    expect(enterFromEmptyBody(editor.state, editor.view.dispatch.bind(editor.view))).toBe(true)
+    expect(exitToggleBody(editor.state, editor.view.dispatch.bind(editor.view))).toBe(true)
+    // Out, not another question: one toggle, and the caret in prose after it.
+    expect(toggleCount(editor)).toBe(1)
+    const { $from } = editor.state.selection
+    expect($from.parent.type.name).toBe('paragraph')
+    expect($from.node(-1).type.name).toBe('doc')
+    editor.destroy()
+  })
+
+  it('exiting a body with several blocks takes the empty line with it', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'toggleBlock',
+          attrs: { open: true, level: 0 },
+          content: [
+            { type: 'toggleSummary', content: [{ type: 'text', text: 'Q' }] },
+            {
+              type: 'toggleContent',
+              content: [
+                { type: 'paragraph', content: [{ type: 'text', text: 'Answer.' }] },
+                { type: 'paragraph' },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+    const toggle = editor.state.doc.child(0)
+    const body = toggle.child(1)
+    const lastPos = 1 + toggle.child(0).nodeSize + 1 + body.child(0).nodeSize + 1
+    editor.commands.setTextSelection(lastPos)
+    expect(exitToggleBody(editor.state, editor.view.dispatch.bind(editor.view))).toBe(true)
+    expect(editor.state.doc.child(0).child(1).childCount).toBe(1)
+    expect(editor.state.doc.child(0).child(1).textContent).toBe('Answer.')
+    expect(editor.state.doc.childCount).toBe(2)
+    editor.destroy()
+  })
+
+  it('a nested toggle exits one level, into its parent body', () => {
+    const editor = makeEditor({
+      type: 'doc',
+      content: [
+        {
+          type: 'toggleBlock',
+          attrs: { open: true, level: 0 },
+          content: [
+            { type: 'toggleSummary', content: [{ type: 'text', text: 'Parent' }] },
+            { type: 'toggleContent', content: [emptyToggle('Child')] },
+          ],
+        },
+      ],
+    })
+    let bodyPos = 0
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'toggleContent' && node.child(0).type.name === 'paragraph') {
+        bodyPos = pos + 2
+        return false
+      }
+    })
+    editor.commands.setTextSelection(bodyPos)
+    expect(exitToggleBody(editor.state, editor.view.dispatch.bind(editor.view))).toBe(true)
+    // The new paragraph is a sibling of the child toggle, inside the parent.
+    const parentBody = editor.state.doc.child(0).child(1)
+    expect(parentBody.childCount).toBe(2)
+    expect(parentBody.child(1).type.name).toBe('paragraph')
     expect(toggleCount(editor)).toBe(2)
+    editor.destroy()
+  })
+
+  it('`/toggle` inside a toggle title never shreds the toggle', () => {
+    const editor = makeEditor({ type: 'doc', content: [emptyToggle('Question')] })
+    editor.commands.setTextSelection(2)
+    expect(insertToggleAtCaret(editor.state, editor.view.dispatch.bind(editor.view), 0)).toBe(true)
+    // A sibling, not a document split: the original title is intact.
+    expect(toggleCount(editor)).toBe(2)
+    expect(editor.state.doc.child(0).child(0).textContent).toBe('Question')
+    expect(editor.state.selection.$from.parent.type.name).toBe('toggleSummary')
+    editor.destroy()
+  })
+
+  it('`/toggle` in an already empty toggle title reuses it', () => {
+    const editor = makeEditor({ type: 'doc', content: [emptyToggle('')] })
+    editor.commands.setTextSelection(2)
+    expect(insertToggleAtCaret(editor.state, editor.view.dispatch.bind(editor.view), 0)).toBe(true)
+    expect(toggleCount(editor)).toBe(1)
+    editor.destroy()
+  })
+
+  it('converting a toggle title again is a no-op, not a nested wrap', () => {
+    const editor = makeEditor({ type: 'doc', content: [emptyToggle('Already a title')] })
+    editor.commands.setTextSelection(4)
+    expect(wrapBlockInToggle(editor.state, editor.view.dispatch.bind(editor.view), 0)).toBe(true)
+    expect(toggleCount(editor)).toBe(1)
+    expect(editor.state.doc.child(0).child(0).textContent).toBe('Already a title')
+    editor.destroy()
+  })
+
+  it('insertToggleAtCaret replaces an empty paragraph and lands in the title', () => {
+    const editor = makeEditor({ type: 'doc', content: [{ type: 'paragraph' }] })
+    editor.commands.setTextSelection(1)
+    expect(insertToggleAtCaret(editor.state, editor.view.dispatch.bind(editor.view), 0)).toBe(true)
+    expect(editor.state.doc.child(0).type.name).toBe('toggleBlock')
+    expect(editor.state.selection.$from.parent.type.name).toBe('toggleSummary')
     editor.destroy()
   })
 

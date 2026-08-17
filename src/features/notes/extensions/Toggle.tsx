@@ -1,15 +1,16 @@
-import { Node, mergeAttributes } from '@tiptap/core'
-import { TextSelection } from '@tiptap/pm/state'
+import { Node, mergeAttributes, type Editor } from '@tiptap/core'
+import { TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state'
 import { NodeViewContent, NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react'
 import { detectDirection } from '@/lib/dir'
 import {
   deleteEmptyToggle,
-  emptyToggleShell,
-  enterFromEmptyBody,
+  exitToggleBody,
   findToggle,
   insertSiblingToggle,
+  insertToggleAtCaret,
   nestUnderPreviousToggle,
   outdentToggle,
+  wrapBlockInToggle,
 } from '@/features/notes/extensions/toggleOutline'
 
 /**
@@ -68,26 +69,41 @@ export const ToggleContent = Node.create({
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
+function ToggleView({ node, editor, getPos }: NodeViewProps) {
   const open = node.attrs.open !== false
   const level = Number(node.attrs.level ?? 0)
 
-  const setOpen = (next: boolean) => {
-    if (!next && typeof getPos === 'function') {
-      const pos = getPos()
-      if (pos !== undefined) {
-        const { from } = editor.state.selection
-        const start = pos
-        const end = pos + node.nodeSize
-        if (from > start && from < end) {
-          const summaryEnd = start + 1 + node.child(0).nodeSize - 1
-          editor.view.dispatch(
-            editor.state.tr.setSelection(TextSelection.create(editor.state.doc, summaryEnd)),
-          )
-        }
-      }
+  /**
+   * The document is the single source of truth, read at click time.
+   *
+   * `node` is a React prop, and Tiptap delivers a changed node by re-rendering
+   * through React's portal registry — which commits a frame later. Deriving the
+   * next state from the prop meant two clicks inside one render cycle both
+   * computed `!open` from the *same* stale value, so the second did nothing and
+   * the arrow felt stuck. Reading `doc.nodeAt(pos)` cannot go stale, and one
+   * transaction carries both the new state and the caret.
+   */
+  const toggleOpen = () => {
+    if (typeof getPos !== 'function') return
+    const pos = getPos()
+    if (pos === undefined) return
+
+    const { state } = editor
+    const current = state.doc.nodeAt(pos)
+    if (!current || current.type.name !== 'toggleBlock') return
+
+    const next = current.attrs.open === false
+    let tr = state.tr.setNodeAttribute(pos, 'open', next)
+
+    // Collapsing is visual only — the body stays in the document — so the one
+    // thing to move is a caret that would otherwise be left inside hidden text.
+    const bodyStart = pos + 1 + current.child(0).nodeSize
+    const { from } = state.selection
+    if (!next && from > bodyStart && from < pos + current.nodeSize) {
+      tr = tr.setSelection(TextSelection.create(tr.doc, bodyStart - 1))
     }
-    updateAttributes({ open: next })
+
+    editor.view.dispatch(tr)
   }
 
   return (
@@ -109,7 +125,7 @@ function ToggleView({ node, updateAttributes, editor, getPos }: NodeViewProps) {
         onClick={(event) => {
           event.preventDefault()
           event.stopPropagation()
-          setOpen(!open)
+          toggleOpen()
         }}
         className="toggle-arrow"
         aria-expanded={open}
@@ -172,55 +188,31 @@ export const ToggleBlock = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(ToggleView)
+    return ReactNodeViewRenderer(ToggleView, {
+      // Clicks on the disclosure control must not be interpreted as editor
+      // selection changes — otherwise ProseMirror can swallow the gesture
+      // before our handler flips `open`.
+      stopEvent: ({ event }) => {
+        const target = event.target as HTMLElement | null
+        return !!target?.closest?.('.toggle-arrow')
+      },
+    })
   },
 
   addCommands() {
     return {
+      // `state.tr` inside a command is the *chained* transaction, so these
+      // helpers compose with `.focus()` and with the slash command's own
+      // `deleteRange` instead of racing them with a second dispatch.
       insertToggle:
         ({ level = 0 } = {}) =>
-        ({ tr, dispatch, editor }) => {
-          const { schema } = editor
-          const node = emptyToggleShell(schema, level)
-
-          const { $from } = tr.selection
-          const inEmptyParagraph =
-            $from.parent.type.name === 'paragraph' && $from.parent.content.size === 0
-          const from = inEmptyParagraph ? $from.before() : tr.selection.from
-          const to = inEmptyParagraph ? $from.after() : tr.selection.to
-          tr.replaceWith(from, to, node)
-
-          if (dispatch) {
-            dispatch(tr.setSelection(TextSelection.near(tr.doc.resolve(from + 2), 1)).scrollIntoView())
-          }
-          return true
-        },
+        ({ state, dispatch }) =>
+          insertToggleAtCaret(state, dispatch, level),
 
       wrapInToggle:
         ({ level = 0 } = {}) =>
-        ({ tr, dispatch, editor }) => {
-          const { schema } = editor
-          const { $from } = tr.selection
-          const depth = $from.depth
-          const block = $from.node(depth)
-          if (!block.isTextblock) return false
-
-          const from = $from.before(depth)
-          const to = $from.after(depth)
-
-          const node = schema.nodes[this.name].create({ open: true, level }, [
-            schema.nodes.toggleSummary.create(null, block.content),
-            schema.nodes.toggleContent.create(null, schema.nodes.paragraph.create()),
-          ])
-          tr.replaceWith(from, to, node)
-
-          if (dispatch) {
-            dispatch(
-              tr.setSelection(TextSelection.near(tr.doc.resolve(from + 1 + node.child(0).nodeSize + 1), 1)),
-            )
-          }
-          return true
-        },
+        ({ state, dispatch }) =>
+          wrapBlockInToggle(state, dispatch, level),
 
       setAllTogglesOpen:
         (open) =>
@@ -239,56 +231,60 @@ export const ToggleBlock = Node.create({
   },
 
   addKeyboardShortcuts() {
+    /** Run an outline operation through the command layer, never a raw dispatch. */
+    const run =
+      (op: (state: EditorState, dispatch?: (tr: Transaction) => void) => boolean) =>
+      ({ editor }: { editor: Editor }) =>
+        editor.commands.command(({ state, dispatch }) => op(state, dispatch))
+
     return {
       Enter: ({ editor }) => {
         const { $from, empty } = editor.state.selection
         if (!empty) return false
 
         if ($from.parent.type.name === 'toggleSummary') {
-          const found = findToggle(editor.state)
-          if (!found) return false
-
-          if (found.node.attrs.open === false) {
-            editor.commands.command(({ tr, dispatch }) => {
-              tr.setNodeAttribute(found.pos, 'open', true)
-              if (dispatch) dispatch(tr)
-              return true
-            })
-          }
-
-          const contentStart = found.pos + 1 + found.node.child(0).nodeSize + 1
-          return editor.commands.command(({ tr, dispatch }) => {
+          return editor.commands.command(({ state, tr, dispatch }) => {
+            const found = findToggle(state)
+            if (!found) return false
+            // Enter in a title always opens the section it is about to write in.
+            tr.setNodeAttribute(found.pos, 'open', true)
+            const contentStart = found.pos + 1 + found.node.child(0).nodeSize + 1
             tr.setSelection(TextSelection.near(tr.doc.resolve(contentStart), 1)).scrollIntoView()
             if (dispatch) dispatch(tr)
             return true
           })
         }
 
-        return enterFromEmptyBody(editor.state, editor.view.dispatch.bind(editor.view))
+        return run(exitToggleBody)({ editor })
       },
 
       /** Rapid consecutive toggles without typing `/toggle` again. */
       'Shift-Enter': ({ editor }) => {
         if (!findToggle(editor.state)) return false
-        return insertSiblingToggle(editor.state, editor.view.dispatch.bind(editor.view))
+        return run(insertSiblingToggle)({ editor })
       },
 
       Tab: ({ editor }) => {
         if (!findToggle(editor.state)) return false
-        return nestUnderPreviousToggle(editor.state, editor.view.dispatch.bind(editor.view))
+        return run(nestUnderPreviousToggle)({ editor })
       },
 
       'Shift-Tab': ({ editor }) => {
         if (!findToggle(editor.state)) return false
-        return outdentToggle(editor.state, editor.view.dispatch.bind(editor.view))
+        return run(outdentToggle)({ editor })
       },
 
       Backspace: ({ editor }) => {
         const { $from, empty } = editor.state.selection
         if (!empty) return false
 
+        // An empty toggle is disposable; a populated one never is, which is
+        // what `deleteEmptyToggle` checks before removing anything.
         if ($from.parent.type.name === 'toggleSummary' && $from.parentOffset === 0) {
-          if (deleteEmptyToggle(editor.state, editor.view.dispatch.bind(editor.view))) return true
+          if (run(deleteEmptyToggle)({ editor })) return true
+          // Otherwise refuse: the default join would pull the title out of the
+          // toggle and strand its body.
+          return true
         }
 
         if ($from.parentOffset !== 0) return false
@@ -300,21 +296,22 @@ export const ToggleBlock = Node.create({
         const found = findToggle(editor.state)
         if (!found) return false
 
-        if (deleteEmptyToggle(editor.state, editor.view.dispatch.bind(editor.view))) return true
+        if (run(deleteEmptyToggle)({ editor })) return true
 
+        // Backspace at the top of a populated body puts the caret in the title
+        // rather than merging the body into it.
         const summaryEnd = found.pos + 1 + found.node.child(0).nodeSize - 1
         return editor.commands.setTextSelection(summaryEnd)
       },
 
-      'Mod-Alt-t': ({ editor }) => {
-        const found = findToggle(editor.state)
-        if (!found) return false
-        return editor.commands.command(({ tr, dispatch }) => {
+      'Mod-Alt-t': ({ editor }) =>
+        editor.commands.command(({ state, tr, dispatch }) => {
+          const found = findToggle(state)
+          if (!found) return false
           tr.setNodeAttribute(found.pos, 'open', found.node.attrs.open === false)
           if (dispatch) dispatch(tr)
           return true
-        })
-      },
+        }),
     }
   },
 })
