@@ -29,96 +29,80 @@ beforeEach(async () => {
 })
 
 describe('LibraryTree outline editing', () => {
-  it('creates consecutive chapters with Enter and no prompt', async () => {
+  it('does not persist a draft until a non-empty title is committed', async () => {
+    const { book } = await seedBook()
+    render(<LibraryTree variant="home" />)
+
+    await waitFor(() => expect(screen.getByText('Kitāb at-Tawḥīd')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Add under Kitāb at-Tawḥīd/i }))
+
+    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
+    expect(await libraryRepo.children(book.id)).toHaveLength(0)
+    expect(screen.queryByText('Untitled')).toBeNull()
+    expect(screen.queryByText(/New item/i)).toBeNull()
+  })
+
+  it('Enter commits one node and opens the next sibling draft', async () => {
     const promptSpy = vi.spyOn(window, 'prompt')
     const { book } = await seedBook()
     render(<LibraryTree variant="home" />)
 
     await waitFor(() => expect(screen.getByText('Kitāb at-Tawḥīd')).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole('button', { name: /New item/i }))
+    fireEvent.click(screen.getByRole('button', { name: /Add under Kitāb at-Tawḥīd/i }))
 
     let input = await waitFor(() => screen.getByLabelText('Title'))
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'Chapter One' } })
-      fireEvent.keyDown(input, { key: 'Enter' })
+    fireEvent.change(input, { target: { value: 'Benefit One' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByText('Benefit One')).toBeInTheDocument())
+    input = await waitFor(() => {
+      const el = screen.getByLabelText('Title') as HTMLInputElement
+      expect(el.value).toBe('')
+      return el
     })
 
-    await waitFor(() => expect(screen.getByText('Chapter One')).toBeInTheDocument())
-    input = await waitFor(() => screen.getByLabelText('Title'))
-    expect((input as HTMLInputElement).value).toBe('')
-
+    // Ensure the first commit chain has fully settled before the next title.
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'Chapter Two' } })
-      fireEvent.keyDown(input, { key: 'Enter' })
+      await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
     })
-    await waitFor(() => expect(screen.getByText('Chapter Two')).toBeInTheDocument())
-
-    input = await waitFor(() => screen.getByLabelText('Title'))
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'Chapter Three' } })
-      fireEvent.keyDown(input, { key: 'Enter' })
-    })
-
+    input = screen.getByLabelText('Title') as HTMLInputElement
+    fireEvent.change(input, { target: { value: 'Benefit Two' } })
     await waitFor(() => {
-      expect(screen.getByText('Chapter One')).toBeInTheDocument()
-      expect(screen.getByText('Chapter Two')).toBeInTheDocument()
-      expect(screen.getByText('Chapter Three')).toBeInTheDocument()
+      expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Benefit Two')
     })
+    fireEvent.keyDown(screen.getByLabelText('Title'), { key: 'Enter' })
 
     await waitFor(async () => {
       const kids = await libraryRepo.children(book.id)
-      expect(kids.map((k) => k.title).filter(Boolean)).toEqual([
-        'Chapter One',
-        'Chapter Two',
-        'Chapter Three',
-      ])
-      expect(kids.some((k) => k.title === '')).toBe(true)
+      expect(kids.map((k) => k.title)).toEqual(['Benefit One', 'Benefit Two'])
     })
-    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
+    expect(screen.getByLabelText('Title')).toBeInTheDocument()
     expect(promptSpy).not.toHaveBeenCalled()
     promptSpy.mockRestore()
   })
 
-  it('renames inline; Escape cancels', async () => {
+  it('Escape cancels a draft without writing to the database', async () => {
     const { book } = await seedBook()
-    const chapter = await libraryRepo.create({
-      parentId: book.id,
-      type: 'chapter',
-      title: 'What came regardng Sihr',
-    })
     render(<LibraryTree variant="home" />)
 
-    const label = await waitFor(() => screen.getByText('What came regardng Sihr'))
-    fireEvent.doubleClick(label)
-
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /Add under Kitāb/i })))
     const input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
-      fireEvent.change(input, { target: { value: 'What came regarding Siḥr' } })
+      fireEvent.change(input, { target: { value: 'Will cancel' } })
       fireEvent.keyDown(input, { key: 'Escape' })
     })
 
-    await waitFor(() => expect(screen.getByText('What came regardng Sihr')).toBeInTheDocument())
-    expect((await db.libraryNodes.get(chapter.id))?.title).toBe('What came regardng Sihr')
-
-    fireEvent.doubleClick(screen.getByText('What came regardng Sihr'))
-    const again = await waitFor(() => screen.getByLabelText('Title'))
-    await act(async () => {
-      fireEvent.change(again, { target: { value: 'What came regarding Siḥr' } })
-      fireEvent.keyDown(again, { key: 'Enter' })
-    })
-    await waitFor(() => expect(screen.getByText('What came regarding Siḥr')).toBeInTheDocument())
-    expect((await db.libraryNodes.get(chapter.id))?.title).toBe('What came regarding Siḥr')
+    await waitFor(() => expect(screen.queryByLabelText('Title')).toBeNull())
+    expect(await libraryRepo.children(book.id)).toHaveLength(0)
   })
 
-  it('Backspace on an empty draft removes it and focuses the previous title', async () => {
+  it('empty Backspace cancels the draft and focuses the previous title', async () => {
     const { book } = await seedBook()
     await libraryRepo.create({ parentId: book.id, type: 'chapter', title: 'Kept' })
     render(<LibraryTree variant="home" />)
 
     await waitFor(() => expect(screen.getByText('Kept')).toBeInTheDocument())
-    // The composer row only appears under an *empty* container; once a branch
-    // has content, adding is the row's own hover `+`.
     fireEvent.click(screen.getByRole('button', { name: /Add under Kitāb at-Tawḥīd/i }))
     const input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
@@ -126,34 +110,30 @@ describe('LibraryTree outline editing', () => {
     })
 
     await waitFor(async () => {
-      const kids = await libraryRepo.children(book.id)
-      expect(kids.map((k) => k.title)).toEqual(['Kept'])
+      expect(await libraryRepo.children(book.id)).toHaveLength(1)
     })
     await waitFor(() => {
-      const editing = screen.getByLabelText('Title') as HTMLInputElement
-      expect(editing.value).toBe('Kept')
+      expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Kept')
     })
   })
 
-  it('Tab indents under the previous chapter when valid', async () => {
+  it('Tab nests a committed draft under the previous sibling', async () => {
     const { book } = await seedBook()
-    const a = await libraryRepo.create({ parentId: book.id, type: 'chapter', title: 'Chapter 1' })
-    const b = await libraryRepo.create({
-      parentId: book.id,
-      type: 'chapter',
-      title: 'Meaning of Tawḥīd',
-    })
+    await libraryRepo.create({ parentId: book.id, type: 'chapter', title: 'Parent' })
     render(<LibraryTree variant="home" />)
 
-    fireEvent.doubleClick(await waitFor(() => screen.getByText('Meaning of Tawḥīd')))
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /Add under Kitāb/i })))
     const input = await waitFor(() => screen.getByLabelText('Title'))
     await act(async () => {
+      fireEvent.change(input, { target: { value: 'Child' } })
       fireEvent.keyDown(input, { key: 'Tab' })
     })
 
     await waitFor(async () => {
-      const moved = await db.libraryNodes.get(b.id)
-      expect(moved?.parentId).toBe(a.id)
+      const parent = (await libraryRepo.children(book.id)).find((n) => n.title === 'Parent')
+      expect(parent).toBeTruthy()
+      const kids = await libraryRepo.children(parent!.id)
+      expect(kids.map((k) => k.title)).toEqual(['Child'])
     })
   })
 
@@ -175,18 +155,100 @@ describe('LibraryTree outline editing', () => {
     })
 
     await waitFor(async () => {
-      const moved = await db.libraryNodes.get(b.id)
-      expect(moved?.parentId).toBe(book.id)
+      expect((await db.libraryNodes.get(b.id))?.parentId).toBe(book.id)
     })
   })
 
-  it('persists outline structure after remount (reload)', async () => {
+  it('renames inline; Escape restores the previous title', async () => {
+    const { book } = await seedBook()
+    const chapter = await libraryRepo.create({
+      parentId: book.id,
+      type: 'chapter',
+      title: 'What came regardng Sihr',
+    })
+    render(<LibraryTree variant="home" />)
+
+    fireEvent.doubleClick(await waitFor(() => screen.getByText('What came regardng Sihr')))
+    const input = await waitFor(() => screen.getByLabelText('Title'))
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'What came regarding Siḥr' } })
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
+
+    await waitFor(() => expect(screen.getByText('What came regardng Sihr')).toBeInTheDocument())
+    expect((await db.libraryNodes.get(chapter.id))?.title).toBe('What came regardng Sihr')
+
+    fireEvent.doubleClick(screen.getByText('What came regardng Sihr'))
+    const again = await waitFor(() => screen.getByLabelText('Title'))
+    await act(async () => {
+      fireEvent.change(again, { target: { value: 'What came regarding Siḥr' } })
+      fireEvent.keyDown(again, { key: 'Enter' })
+    })
+    await waitFor(() => expect(screen.getByText('What came regarding Siḥr')).toBeInTheDocument())
+    expect((await db.libraryNodes.get(chapter.id))?.title).toBe('What came regarding Siḥr')
+  })
+
+  it('supports recursive creation at 6+ levels', async () => {
+    const { book } = await seedBook()
+    render(<LibraryTree variant="home" />)
+
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /Add under Kitāb/i })))
+    let input = await waitFor(() => screen.getByLabelText('Title'))
+    fireEvent.change(input, { target: { value: 'L1' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument())
+
+    // TYPE → TAB (nest) → ENTER (next draft) at each deeper level.
+    for (let level = 2; level <= 6; level++) {
+      input = await waitFor(() => {
+        const el = screen.getByLabelText('Title') as HTMLInputElement
+        expect(el.value).toBe('')
+        return el
+      })
+      fireEvent.change(input, { target: { value: `L${level}` } })
+      fireEvent.keyDown(input, { key: 'Tab' })
+
+      await waitFor(async () => {
+        let parentId = book.id
+        for (let i = 1; i < level; i++) {
+          const kids = await libraryRepo.children(parentId)
+          const hit = kids.find((k) => k.title === `L${i}`)
+          expect(hit).toBeTruthy()
+          parentId = hit!.id
+        }
+        const nested = await libraryRepo.children(parentId)
+        expect(nested.some((k) => k.title === `L${level}`)).toBe(true)
+      })
+      // Tab leaves the new node in rename mode.
+      await waitFor(() => {
+        expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(`L${level}`)
+      })
+
+      input = screen.getByLabelText('Title')
+      fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => {
+        expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('')
+      })
+    }
+
+    let current = book.id
+    for (let level = 1; level <= 6; level++) {
+      const kids = await libraryRepo.children(current)
+      const hit = kids.find((k) => k.title === `L${level}`)
+      expect(hit).toBeTruthy()
+      current = hit!.id
+    }
+  })
+
+  it('reload keeps committed nodes only — not the open draft', async () => {
     const { book } = await seedBook()
     await libraryRepo.create({ parentId: book.id, type: 'chapter', title: 'One' })
     await libraryRepo.create({ parentId: book.id, type: 'chapter', title: 'Two' })
 
     const { unmount } = render(<LibraryTree variant="home" />)
     await waitFor(() => expect(screen.getByText('Two')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: /Add under Kitāb/i }))
+    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
     unmount()
 
     render(<LibraryTree variant="home" />)
@@ -194,8 +256,26 @@ describe('LibraryTree outline editing', () => {
       expect(screen.getByText('One')).toBeInTheDocument()
       expect(screen.getByText('Two')).toBeInTheDocument()
     })
+    expect(screen.queryByLabelText('Title')).toBeNull()
     const kids = await libraryRepo.children(book.id)
     expect(kids.map((k) => k.title)).toEqual(['One', 'Two'])
+  })
+
+  it('persists mixed Arabic/English titles', async () => {
+    const { book } = await seedBook()
+    render(<LibraryTree variant="home" />)
+
+    fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /Add under Kitāb/i })))
+    const input = await waitFor(() => screen.getByLabelText('Title'))
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'Chapter — باب الخوف من الشرك' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
+
+    await waitFor(async () => {
+      const kids = await libraryRepo.children(book.id)
+      expect(kids[0]?.title).toBe('Chapter — باب الخوف من الشرك')
+    })
   })
 
   it('single click navigates; double-click starts inline edit', async () => {
@@ -208,7 +288,6 @@ describe('LibraryTree outline editing', () => {
 
     render(<LibraryTree variant="sidebar" />)
     const title = await waitFor(() => screen.getByText('Navigate me'))
-    // Single click must not enter edit mode.
     fireEvent.click(title)
     expect(screen.queryByLabelText('Title')).toBeNull()
     await waitFor(() => expect(useLibraryStore.getState().activeNodeId).toBe(chapter.id))

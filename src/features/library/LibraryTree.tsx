@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import {
-  ITEM_LABEL,
   canNestUnder,
   canSitAtRoot,
   childTypeFor,
-  isBlankTitle,
   isContainerType,
   previousSibling,
 } from '@/features/library/libraryOutline'
@@ -18,9 +16,8 @@ import type { LibraryNode, LibraryNodeType } from '@/types'
 /**
  * The library tree — Notion-like outline editing over real LibraryNodes.
  *
- * Click navigates. Double-click / Rename edits inline. Enter creates the next
- * sibling. Tab / Shift+Tab indent within structural rules. Empty Backspace
- * removes only blank draft rows.
+ * Drafts are UI-only until a non-empty title is committed. Empty / cancelled
+ * drafts never touch IndexedDB. Depth only changes indentation.
  */
 
 const ICONS: Record<LibraryNodeType, IconName> = {
@@ -59,13 +56,33 @@ export function NodeTitle({
   )
 }
 
+/** Ephemeral create row — not a LibraryNode until committed. */
+interface DraftSession {
+  kind: 'draft'
+  parentId: string
+  /** Insert after this sibling, or at end when null. */
+  afterId: string | null
+  type: LibraryNodeType
+  text: string
+}
+
+/** In-place rename of an existing node. */
+interface RenameSession {
+  kind: 'rename'
+  nodeId: string
+  arabic: boolean
+  text: string
+  snapshot: { title: string; arabicTitle?: string }
+}
+
+type EditSession = DraftSession | RenameSession
+
 interface TreeProps {
   variant: 'home' | 'sidebar'
   onContextMenu?: (node: LibraryNode, event: React.MouseEvent) => void
   outline?: OutlineEntry[]
   onOutlineJump?: (blockId: string) => void
   suppressEmpty?: boolean
-  /** Ask the tree to begin inline rename (e.g. from a context menu). */
   renameRequest?: { id: string; arabic?: boolean } | null
   onRenameRequestHandled?: () => void
 }
@@ -88,18 +105,13 @@ export function LibraryTree({
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
   const [outlineCollapsed, setOutlineCollapsed] = useState(false)
-
-  /** Row currently being edited (rename or fresh blank). */
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const [draftArabic, setDraftArabic] = useState(false)
+  const [session, setSession] = useState<EditSession | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  /** Snapshot for Escape cancel on rename. */
-  const editSnapshot = useRef<{ title: string; arabicTitle?: string } | null>(null)
-  /** Ids created this session that are still blank drafts. */
-  const draftIds = useRef(new Set<string>())
-  /** Suppress blur-commit when Enter/Tab/Escape already handled the edit. */
   const ignoreBlur = useRef(false)
+  const sessionRef = useRef<EditSession | null>(null)
+  /** Serializes Enter/Tab commits so rapid outline typing cannot double-submit or drop. */
+  const commitChain = useRef(Promise.resolve())
+  // sessionRef is updated only via helpers — never overwritten from render.
 
   const byParent = useMemo(() => {
     const map = new Map<string | null, LibraryNode[]>()
@@ -118,114 +130,78 @@ export function LibraryTree({
     return map
   }, [nodes])
 
-  const beginEdit = useCallback((node: LibraryNode, arabic = false) => {
-    editSnapshot.current = { title: node.title, arabicTitle: node.arabicTitle }
-    setDraftArabic(arabic)
-    setDraft(arabic ? (node.arabicTitle ?? '') : node.title)
-    setEditingId(node.id)
+  const beginRename = useCallback((node: LibraryNode, arabic = false) => {
+    const next: RenameSession = {
+      kind: 'rename',
+      nodeId: node.id,
+      arabic,
+      text: arabic ? (node.arabicTitle ?? '') : node.title,
+      snapshot: { title: node.title, arabicTitle: node.arabicTitle },
+    }
+    sessionRef.current = next
+    setSession(next)
+  }, [])
+
+  const beginDraft = useCallback(async (parent: LibraryNode, afterId: string | null = null) => {
+    const type = childTypeFor(parent.type)
+    if (!type) return
+    await libraryRepo.update(parent.id, { collapsed: false })
+    const next: DraftSession = {
+      kind: 'draft',
+      parentId: parent.id,
+      afterId,
+      type,
+      text: '',
+    }
+    sessionRef.current = next
+    setSession(next)
   }, [])
 
   useEffect(() => {
     if (!renameRequest) return
     const node = byId.get(renameRequest.id)
     if (!node) return
-    beginEdit(node, !!renameRequest.arabic)
+    beginRename(node, !!renameRequest.arabic)
     onRenameRequestHandled?.()
-  }, [renameRequest, byId, onRenameRequestHandled, beginEdit])
+  }, [renameRequest, byId, onRenameRequestHandled, beginRename])
 
   useEffect(() => {
-    if (editingId) inputRef.current?.focus()
-  }, [editingId, draftArabic])
+    if (!session) return
+    ignoreBlur.current = true
+    inputRef.current?.focus()
+    requestAnimationFrame(() => {
+      ignoreBlur.current = false
+    })
+  }, [session])
 
-  const createChild = async (parent: LibraryNode, afterId?: string | null) => {
-    const type = childTypeFor(parent.type)
-    if (!type) return
-    await libraryRepo.update(parent.id, { collapsed: false })
-    // Read siblings from the DB — render-time maps can lag a live-query tick.
-    const siblings = await libraryRepo.children(parent.id)
-    const afterIndex = afterId ? siblings.findIndex((s) => s.id === afterId) : siblings.length - 1
-    const node = await libraryRepo.create({ parentId: parent.id, type, title: '' })
-    const index = Math.max(0, afterIndex + 1)
-    await libraryRepo.move(node.id, parent.id, index)
-    draftIds.current.add(node.id)
-    editSnapshot.current = { title: '', arabicTitle: undefined }
-    setDraftArabic(false)
-    setDraft('')
-    setEditingId(node.id)
+  const updateSessionText = (text: string) => {
+    const prev = sessionRef.current
+    if (!prev) return
+    const next = { ...prev, text }
+    sessionRef.current = next
+    setSession(next)
   }
 
-  const commitEdit = async (opts: {
-    nextSibling: boolean
-    cancel: boolean
-    /** Only Backspace should destroy an empty draft — blur must not. */
-    removeIfEmpty?: boolean
-  }) => {
-    if (!editingId) return
-    const node = byId.get(editingId)
-    if (!node) {
-      setEditingId(null)
-      return
-    }
+  const clearSession = () => {
+    sessionRef.current = null
+    setSession(null)
+    ignoreBlur.current = false
+  }
 
-    if (opts.cancel) {
-      if (draftIds.current.has(node.id) && isBlankTitle(node.title) && !node.arabicTitle) {
-        draftIds.current.delete(node.id)
-        await libraryRepo.remove(node.id, { deleteNotes: true })
-      } else if (editSnapshot.current) {
-        await libraryRepo.update(node.id, {
-          title: editSnapshot.current.title,
-          arabicTitle: editSnapshot.current.arabicTitle,
-        })
-      }
-      setEditingId(null)
-      return
-    }
-
-    const value = draft.trim()
-    if (draftArabic) {
-      await libraryRepo.update(node.id, { arabicTitle: value || undefined })
-      draftIds.current.delete(node.id)
-      setEditingId(null)
-      return
-    }
-
-    if (!value) {
-      /**
-       * An unnamed draft never survives losing focus.
-       *
-       * Leaving it behind was what littered the tree with "Untitled" rows:
-       * press Enter to line up the next item, change your mind, click away —
-       * and a permanent blank node stayed in the library. Discarding is safe
-       * precisely because it is still a draft: it has never carried a title,
-       * so there is nothing of the reader's to lose. A node that *was* named
-       * is not a draft and is never touched here.
-       */
-      if (draftIds.current.has(node.id) && !node.arabicTitle) {
-        draftIds.current.delete(node.id)
-        const prevId = previousSibling(node, byParent.get(node.parentId) ?? [])?.id
-        await libraryRepo.remove(node.id, { deleteNotes: true })
-        setEditingId(null)
-        // Backspace walks back up the list; blur simply lets go.
-        if (opts.removeIfEmpty && prevId) {
-          const prev = byId.get(prevId)
-          if (prev) beginEdit(prev)
-        }
-        return
-      }
-      setEditingId(null)
-      return
-    }
-
-    await libraryRepo.update(node.id, { title: value })
-    draftIds.current.delete(node.id)
-    setEditingId(null)
-
-    if (opts.nextSibling) {
-      if (node.parentId) {
-        const parent = byId.get(node.parentId)
-        if (parent) await createChild(parent, node.id)
-      }
-    }
+  /** Persist a draft title as a real node; returns the new id. */
+  const persistDraft = async (draft: DraftSession, title: string): Promise<LibraryNode> => {
+    const siblings = await libraryRepo.children(draft.parentId)
+    const afterIndex = draft.afterId
+      ? siblings.findIndex((s) => s.id === draft.afterId)
+      : siblings.length - 1
+    const node = await libraryRepo.create({
+      parentId: draft.parentId,
+      type: draft.type,
+      title,
+    })
+    const index = Math.max(0, afterIndex + 1)
+    await libraryRepo.move(node.id, draft.parentId, index)
+    return node
   }
 
   const indent = async (node: LibraryNode) => {
@@ -247,7 +223,6 @@ export function LibraryTree({
       const grand = await libraryRepo.get(grandParentId)
       if (!grand || !canNestUnder(node.type, grand.type)) return
     } else if (!canSitAtRoot(node.type)) {
-      // A study item must never escape into the root; it belongs to a book.
       return
     }
     const uncleSiblings = await libraryRepo.children(grandParentId)
@@ -255,14 +230,200 @@ export function LibraryTree({
     await libraryRepo.move(node.id, grandParentId, parentIndex + 1)
   }
 
+  const focusPreviousTitle = async (parentId: string | null, afterId: string | null) => {
+    if (!parentId) {
+      clearSession()
+      return
+    }
+    const siblings = await libraryRepo.children(parentId)
+    if (afterId) {
+      const prev = siblings.find((s) => s.id === afterId)
+      if (prev) {
+        beginRename(prev)
+        return
+      }
+    }
+    const last = siblings[siblings.length - 1]
+    if (last) beginRename(last)
+    else clearSession()
+  }
+
+  const runCommit = (job: () => Promise<void>) => {
+    ignoreBlur.current = true
+    const next = commitChain.current.then(job).catch(() => undefined)
+    commitChain.current = next
+    void next.finally(() => {
+      if (commitChain.current !== next) return
+      requestAnimationFrame(() => {
+        if (commitChain.current === next) ignoreBlur.current = false
+      })
+    })
+    return next
+  }
+
+  const commitSession = (opts: {
+    nextSibling: boolean
+    cancel: boolean
+    focusPrevious?: boolean
+    rawText?: string
+  }) => {
+    // Capture at queue time — the input may remount before the job runs.
+    const queuedText = opts.rawText ?? sessionRef.current?.text ?? ''
+    return runCommit(async () => {
+      const current = sessionRef.current
+      if (!current) return
+
+      const liveText =
+        (inputRef.current?.value && inputRef.current.value.length > 0
+          ? inputRef.current.value
+          : null) ??
+        (queuedText.length > 0 ? queuedText : null) ??
+        current.text
+
+      if (current.kind === 'draft') {
+        if (opts.cancel) {
+          const { parentId, afterId } = current
+          clearSession()
+          if (opts.focusPrevious) await focusPreviousTitle(parentId, afterId)
+          return
+        }
+
+        if (!liveText.trim()) {
+          clearSession()
+          return
+        }
+
+        const draft = { ...current }
+        const title = liveText.trim()
+        const parentId = draft.parentId
+
+        if (opts.nextSibling) {
+          const pending: DraftSession = {
+            kind: 'draft',
+            parentId,
+            afterId: draft.afterId,
+            type: draft.type,
+            text: '',
+          }
+          sessionRef.current = pending
+          setSession(pending)
+        } else {
+          sessionRef.current = null
+          setSession(null)
+        }
+
+        const created = await persistDraft(draft, title)
+
+        if (opts.nextSibling) {
+          const latest = sessionRef.current
+          const next: DraftSession = {
+            kind: 'draft',
+            parentId,
+            afterId: created.id,
+            type: draft.type,
+            text:
+              latest?.kind === 'draft' && latest.parentId === parentId ? latest.text : '',
+          }
+          sessionRef.current = next
+          setSession(next)
+        }
+        return
+      }
+
+      const node = await libraryRepo.get(current.nodeId)
+      if (!node) {
+        clearSession()
+        return
+      }
+
+      if (opts.cancel) {
+        await libraryRepo.update(node.id, {
+          title: current.snapshot.title,
+          arabicTitle: current.snapshot.arabicTitle,
+        })
+        clearSession()
+        return
+      }
+
+      const value = liveText.trim()
+      if (current.arabic) {
+        await libraryRepo.update(node.id, { arabicTitle: value || undefined })
+        clearSession()
+        return
+      }
+
+      if (!value) {
+        clearSession()
+        return
+      }
+
+      await libraryRepo.update(node.id, { title: value })
+
+      if (opts.nextSibling && node.parentId) {
+        const parent = await libraryRepo.get(node.parentId)
+        const type = parent ? childTypeFor(parent.type) : null
+        if (parent && type) {
+          const latest = sessionRef.current
+          const next: DraftSession = {
+            kind: 'draft',
+            parentId: parent.id,
+            afterId: node.id,
+            type,
+            text:
+              latest?.kind === 'draft' && latest.parentId === parent.id ? latest.text : '',
+          }
+          sessionRef.current = next
+          setSession(next)
+          return
+        }
+      }
+      clearSession()
+    })
+  }
+
+  const handleTab = (shift: boolean, rawText?: string) =>
+    runCommit(async () => {
+      const current = sessionRef.current
+      if (!current) return
+
+      if (current.kind === 'draft') {
+        const title = (rawText ?? current.text).trim()
+        if (!title) {
+          requestAnimationFrame(() => {
+            inputRef.current?.focus()
+          })
+          return
+        }
+        sessionRef.current = null
+        setSession(null)
+        const created = await persistDraft(current, title)
+        if (shift) await outdent(created)
+        else await indent(created)
+        const fresh = await libraryRepo.get(created.id)
+        if (fresh) beginRename(fresh)
+        return
+      }
+
+      const value = (rawText ?? current.text).trim()
+      if (current.arabic) {
+        await libraryRepo.update(current.nodeId, { arabicTitle: value || undefined })
+      } else if (value) {
+        await libraryRepo.update(current.nodeId, { title: value })
+      }
+      const fresh = await libraryRepo.get(current.nodeId)
+      if (fresh) {
+        if (shift) await outdent(fresh)
+        else await indent(fresh)
+        const moved = await libraryRepo.get(current.nodeId)
+        if (moved) beginRename(moved, current.arabic)
+      }
+    })
+
   const handleDrop = useCallback(
     async (target: LibraryNode) => {
       if (!dragId || dragId === target.id || !nodes) return
       const dragged = nodes.find((n) => n.id === dragId)
       if (!dragged) return
-      // Nest wherever the structure allows, not only under the four organiser
-      // types. Gating this on `isContainerType` meant a drop onto a study item
-      // always landed *beside* it, so drag and drop could never build depth.
       if (canNestUnder(dragged.type, target.type)) {
         const children = byParent.get(target.id) ?? []
         await libraryRepo.move(dragId, target.id, children.length)
@@ -281,122 +442,159 @@ export function LibraryTree({
     [dragId, nodes, byParent],
   )
 
+  const renderEditor = (opts: {
+    depth: number
+    text: string
+    arabic: boolean
+    onChange: (value: string) => void
+    showCaret: boolean
+    expanded?: boolean
+  }) => (
+    <div
+      className="lib-row is-editing"
+      style={{ paddingInlineStart: `${opts.depth * 0.85 + 0.35}rem` }}
+    >
+      {opts.showCaret ? (
+        <span className="lib-caret" aria-hidden>
+          <Icon name="chevron-right" className={`h-3 w-3 ${opts.expanded ? 'rotate-90' : ''}`} />
+        </span>
+      ) : (
+        <span className="lib-caret" aria-hidden />
+      )}
+      <input
+        ref={inputRef}
+        className={`lib-inline-input ${opts.arabic ? 'font-arabic' : ''}`}
+        dir={opts.arabic ? 'rtl' : 'auto'}
+        value={opts.text}
+        placeholder=""
+        aria-label={opts.arabic ? 'Arabic title' : 'Title'}
+        onChange={(e) => opts.onChange(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          const rawText = (e.currentTarget as HTMLInputElement).value
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            ignoreBlur.current = true
+            void commitSession({
+              nextSibling: !opts.arabic,
+              cancel: false,
+              rawText,
+            })
+          } else if (e.key === 'Escape') {
+            e.preventDefault()
+            ignoreBlur.current = true
+            void commitSession({ nextSibling: false, cancel: true, rawText })
+          } else if (e.key === 'Tab') {
+            e.preventDefault()
+            void handleTab(e.shiftKey, rawText)
+          } else if (e.key === 'Backspace' && rawText === '' && !opts.arabic) {
+            e.preventDefault()
+            ignoreBlur.current = true
+            void commitSession({
+              nextSibling: false,
+              cancel: true,
+              focusPrevious: true,
+              rawText,
+            })
+          }
+        }}
+        onBlur={() => {
+          if (ignoreBlur.current) return
+          void commitSession({
+            nextSibling: false,
+            cancel: false,
+            rawText: inputRef.current?.value,
+          })
+        }}
+      />
+    </div>
+  )
+
+  const renderDraftRow = (parent: LibraryNode, depth: number) => {
+    if (!session || session.kind !== 'draft' || session.parentId !== parent.id) return null
+    return (
+      <li key="__draft__">
+        {renderEditor({
+          depth: depth + 1,
+          text: session.text,
+          arabic: false,
+          onChange: updateSessionText,
+          showCaret: false,
+        })}
+      </li>
+    )
+  }
+
   const renderNode = (node: LibraryNode, depth: number): React.ReactNode => {
     const children = byParent.get(node.id) ?? []
     const isContainer = isContainerType(node.type)
     const expanded = !node.collapsed
     const selected = activeNodeId === node.id
-    const editing = editingId === node.id
     const canAdd = childTypeFor(node.type) !== null
+    const renaming =
+      session?.kind === 'rename' && session.nodeId === node.id ? session : null
+    const showChildren = expanded || (session?.kind === 'draft' && session.parentId === node.id)
 
     return (
       <li key={node.id}>
-        <div
-          className={`lib-row ${selected ? 'is-selected' : ''} ${dropTarget === node.id ? 'is-drop' : ''} ${editing ? 'is-editing' : ''} lib-row-${node.type}`}
-          style={{ paddingInlineStart: `${depth * 0.85 + 0.35}rem` }}
-          draggable={!editing}
-          onDragStart={(e) => {
-            if (editing) return
-            e.stopPropagation()
-            setDragId(node.id)
-            e.dataTransfer.effectAllowed = 'move'
-          }}
-          onDragOver={(e) => {
-            if (!dragId || dragId === node.id) return
-            e.preventDefault()
-            setDropTarget(node.id)
-          }}
-          onDragLeave={() => setDropTarget((t) => (t === node.id ? null : t))}
-          onDrop={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            void handleDrop(node)
-          }}
-          onDragEnd={() => {
-            setDragId(null)
-            setDropTarget(null)
-          }}
-          onContextMenu={(e) => {
-            if (!onContextMenu) return
-            e.preventDefault()
-            onContextMenu(node, e)
-          }}
-        >
-          {isContainer || children.length > 0 ? (
-            <button
-              type="button"
-              className="lib-caret"
-              aria-label={expanded ? 'Collapse' : 'Expand'}
-              aria-expanded={expanded}
-              onClick={(e) => {
-                e.stopPropagation()
-                void toggleExpanded(node.id, expanded)
-              }}
-            >
-              <Icon name="chevron-right" className={`h-3 w-3 ${expanded ? 'rotate-90' : ''}`} />
-            </button>
-          ) : (
-            <span className="lib-caret" aria-hidden />
-          )}
+        {renaming ? (
+          renderEditor({
+            depth,
+            text: renaming.text,
+            arabic: renaming.arabic,
+            onChange: updateSessionText,
+            showCaret: isContainer || children.length > 0,
+            expanded,
+          })
+        ) : (
+          <div
+            className={`lib-row ${selected ? 'is-selected' : ''} ${dropTarget === node.id ? 'is-drop' : ''} lib-row-${node.type}`}
+            style={{ paddingInlineStart: `${depth * 0.85 + 0.35}rem` }}
+            draggable
+            onDragStart={(e) => {
+              e.stopPropagation()
+              setDragId(node.id)
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragOver={(e) => {
+              if (!dragId || dragId === node.id) return
+              e.preventDefault()
+              setDropTarget(node.id)
+            }}
+            onDragLeave={() => setDropTarget((t) => (t === node.id ? null : t))}
+            onDrop={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              void handleDrop(node)
+            }}
+            onDragEnd={() => {
+              setDragId(null)
+              setDropTarget(null)
+            }}
+            onContextMenu={(e) => {
+              if (!onContextMenu) return
+              e.preventDefault()
+              onContextMenu(node, e)
+            }}
+          >
+            {isContainer || children.length > 0 || canAdd ? (
+              <button
+                type="button"
+                className="lib-caret"
+                aria-label={expanded ? 'Collapse' : 'Expand'}
+                aria-expanded={expanded}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void toggleExpanded(node.id, expanded)
+                }}
+              >
+                <Icon name="chevron-right" className={`h-3 w-3 ${expanded ? 'rotate-90' : ''}`} />
+              </button>
+            ) : (
+              <span className="lib-caret" aria-hidden />
+            )}
 
-          {editing ? (
-            <input
-              ref={inputRef}
-              className={`lib-inline-input ${draftArabic ? 'font-arabic' : ''}`}
-              dir={draftArabic ? 'rtl' : 'auto'}
-              value={draft}
-              placeholder={draftArabic ? 'Arabic title' : 'Untitled'}
-              aria-label={draftArabic ? 'Arabic title' : 'Title'}
-              onChange={(e) => setDraft(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                e.stopPropagation()
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  ignoreBlur.current = true
-                  void commitEdit({ nextSibling: !draftArabic, cancel: false })
-                } else if (e.key === 'Escape') {
-                  e.preventDefault()
-                  ignoreBlur.current = true
-                  void commitEdit({ nextSibling: false, cancel: true })
-                } else if (e.key === 'Tab') {
-                  e.preventDefault()
-                  ignoreBlur.current = true
-                  void (async () => {
-                    const value = draft.trim()
-                    if (draftArabic) {
-                      await libraryRepo.update(node.id, { arabicTitle: value || undefined })
-                    } else if (value) {
-                      await libraryRepo.update(node.id, { title: value })
-                      draftIds.current.delete(node.id)
-                    }
-                    // Re-read after save — the render closure's parentId goes stale after indent.
-                    const fresh = await libraryRepo.get(node.id)
-                    if (fresh) {
-                      if (e.shiftKey) await outdent(fresh)
-                      else await indent(fresh)
-                    }
-                    setEditingId(node.id)
-                    requestAnimationFrame(() => {
-                      ignoreBlur.current = false
-                      inputRef.current?.focus()
-                    })
-                  })()
-                } else if (e.key === 'Backspace' && draft === '' && !draftArabic) {
-                  e.preventDefault()
-                  ignoreBlur.current = true
-                  void commitEdit({ nextSibling: false, cancel: false, removeIfEmpty: true })
-                }
-              }}
-              onBlur={() => {
-                if (ignoreBlur.current) {
-                  ignoreBlur.current = false
-                  return
-                }
-                void commitEdit({ nextSibling: false, cancel: false })
-              }}
-            />
-          ) : (
             <button
               type="button"
               className="lib-label"
@@ -404,63 +602,51 @@ export function LibraryTree({
               onDoubleClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                beginEdit(node)
+                beginRename(node)
               }}
               title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Untitled'}
             >
-              {/**
-               * Only books carry an icon.
-               *
-               * Sciences had one, books had another and study items had none,
-               * so the left edge came out ragged and the glyphs said nothing
-               * the indentation was not already saying. Depth is the hierarchy;
-               * the one mark left is the thing you actually scan for — where a
-               * book begins.
-               */}
               {node.type === 'book' && <Icon name={ICONS.book} className="lib-icon" />}
               <NodeTitle node={node} />
               {node.favorite && <Icon name="star" className="lib-star" />}
             </button>
-          )}
 
-          {canAdd && (
-            <button
-              type="button"
-              className="lib-add"
-              aria-label={`Add under ${node.title || 'item'}`}
-              title="Add"
-              onClick={(e) => {
-                e.stopPropagation()
-                // Always inline. Routing study items through `onAdd` sent them
-                // back to a browser prompt, which is exactly the workflow the
-                // outline replaces.
-                void createChild(node)
-              }}
-            >
-              <Icon name="plus" className="h-3 w-3" />
-            </button>
-          )}
-          {onContextMenu && (
-            <button
-              type="button"
-              className="lib-more"
-              aria-label="More"
-              title="More"
-              onClick={(e) => {
-                e.stopPropagation()
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                onContextMenu(node, {
-                  ...e,
-                  clientX: rect.left,
-                  clientY: rect.bottom,
-                  preventDefault: () => undefined,
-                } as React.MouseEvent)
-              }}
-            >
-              ⋯
-            </button>
-          )}
-        </div>
+            {canAdd && (
+              <button
+                type="button"
+                className="lib-add"
+                aria-label={`Add under ${node.title || 'item'}`}
+                title="Add"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void beginDraft(node, null)
+                }}
+              >
+                <Icon name="plus" className="h-3 w-3" />
+              </button>
+            )}
+            {onContextMenu && (
+              <button
+                type="button"
+                className="lib-more"
+                aria-label="More"
+                title="More"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                  onContextMenu(node, {
+                    ...e,
+                    clientX: rect.left,
+                    clientY: rect.bottom,
+                    preventDefault: () => undefined,
+                  } as React.MouseEvent)
+                }}
+              >
+                ⋯
+              </button>
+            )}
+          </div>
+        )}
 
         {selected && outline && outline.length > 0 && (
           <Outline
@@ -472,37 +658,22 @@ export function LibraryTree({
           />
         )}
 
-        {expanded && (
+        {showChildren && (
           <ul>
-            {children.map((child) => renderNode(child, depth + 1))}
-            {/**
-             * Only where a branch would otherwise look dead.
-             *
-             * A standing "New item" row under every container turned a small
-             * tree into a third clutter: three of them were visible at once in
-             * a nine-row library. Adding is the hover `+` on the row itself
-             * (§18); this row exists solely so an expanded, empty container
-             * still offers somewhere to start, and it disappears the moment
-             * there is anything inside.
-             */}
-            {canAdd && children.length === 0 && editingId === null && (
-              <li>
-                <button
-                  type="button"
-                  className="lib-composer"
-                  style={{ paddingInlineStart: `${(depth + 1) * 0.85 + 0.35}rem` }}
-                  onClick={() => void createChild(node)}
-                >
-                  <span className="lib-composer-mark" aria-hidden>
-                    +
-                  </span>
-                  {/* Never "New chapter": below a book everything is just an
-                      item, and naming the level is the mental model this
-                      outline is meant to remove. */}
-                  {childTypeFor(node.type) === 'book' ? 'New book' : `New ${ITEM_LABEL}`}
-                </button>
-              </li>
-            )}
+            {children.map((child) => (
+              <Fragment key={child.id}>
+                {renderNode(child, depth + 1)}
+                {session?.kind === 'draft' &&
+                  session.parentId === node.id &&
+                  session.afterId === child.id &&
+                  renderDraftRow(node, depth)}
+              </Fragment>
+            ))}
+            {session?.kind === 'draft' &&
+              session.parentId === node.id &&
+              (session.afterId === null ||
+                !children.some((c) => c.id === session.afterId)) &&
+              renderDraftRow(node, depth)}
           </ul>
         )}
       </li>
@@ -595,5 +766,4 @@ function Outline({
   )
 }
 
-/** Exported for context menus that want inline rename without prompts. */
 export type { LibraryNode }
