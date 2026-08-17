@@ -108,8 +108,10 @@
     overscroll-behavior: none;
   }
 
-  /* One focus treatment everywhere, always visible, never a fuzzy glow. */
-  :focus-visible {
+  /* One focus treatment everywhere, always visible, never a fuzzy glow.
+     Library outline editing is an exception: the caret alone is the focus signal,
+     so a focus ring would look like a bordered form field inside the tree. */
+  :focus-visible:not(.lib-inline-input) {
     outline: 2px solid var(--color-accent);
     outline-offset: 1px;
     border-radius: 2px;
@@ -1838,30 +1840,42 @@ svg.block-menu-icon {
 .lib-inline-input {
   flex: 1;
   min-width: 0;
+  width: 100%;
   height: 1.45rem;
   margin: 0;
   padding: 0;
-  border: none;
+  border: 0 !important;
   border-radius: 0;
-  background: transparent;
+  background: transparent !important;
   color: var(--color-ink);
   font: inherit;
   font-size: 12.5px;
   line-height: 1.45;
-  outline: none;
-  box-shadow: none;
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
   appearance: none;
   -webkit-appearance: none;
+  caret-color: var(--color-ink);
 }
-.lib-inline-input:focus {
-  outline: none;
-  box-shadow: none;
+.lib-inline-input:focus,
+.lib-inline-input:focus-visible,
+.lib-inline-input:active {
+  border: 0 !important;
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
 }
 .lib-inline-input::placeholder {
   color: transparent;
 }
 .lib-row.is-editing {
   background: transparent;
+}
+.lib-row.is-editing:focus-within {
+  outline: none;
+  box-shadow: none;
 }
 
 /* §E42 — science reads louder than book, book louder than chapter. */
