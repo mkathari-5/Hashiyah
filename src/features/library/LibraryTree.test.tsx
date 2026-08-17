@@ -1,5 +1,5 @@
 ﻿import Dexie from 'dexie'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { db } from '@/db/db'
 import { libraryRepo } from '@/db/repos/libraryTree'
@@ -28,6 +28,14 @@ beforeEach(async () => {
   useLibraryStore.setState({ activeNodeId: null })
 })
 
+afterEach(async () => {
+  // Let any queued outline commits / rAF focus handlers finish before the next seed.
+  await act(async () => {
+    await Promise.resolve()
+    await new Promise((r) => setTimeout(r, 0))
+  })
+})
+
 describe('LibraryTree outline editing', () => {
   it('does not persist a draft until a non-empty title is committed', async () => {
     const { book } = await seedBook()
@@ -40,6 +48,54 @@ describe('LibraryTree outline editing', () => {
     expect(await libraryRepo.children(book.id)).toHaveLength(0)
     expect(screen.queryByText('Untitled')).toBeNull()
     expect(screen.queryByText(/New item/i)).toBeNull()
+  })
+
+  it('expanding an empty item opens a draft line without clicking +', async () => {
+    const { book } = await seedBook()
+    await libraryRepo.update(book.id, { collapsed: true })
+    render(<LibraryTree variant="home" />)
+
+    await waitFor(() => expect(screen.getByText('Kitāb at-Tawḥīd')).toBeInTheDocument())
+    const bookRow = screen.getByText('Kitāb at-Tawḥīd').closest('.lib-row')
+    const caret = bookRow?.querySelector('button.lib-caret')
+    expect(caret).toBeTruthy()
+    fireEvent.click(caret!)
+
+    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
+    expect(await libraryRepo.children(book.id)).toHaveLength(0)
+    expect(screen.queryByText(/New item/i)).toBeNull()
+    // Stay in Library — expanding a toggle must not open Study.
+    expect(useLibraryStore.getState().activeNodeId).toBeNull()
+  })
+
+  it('clicking an empty item starts writing under it like a Notion toggle', async () => {
+    const { book } = await seedBook()
+    await libraryRepo.update(book.id, { collapsed: true })
+    render(<LibraryTree variant="home" />)
+
+    fireEvent.click(await waitFor(() => screen.getByText('Kitāb at-Tawḥīd')))
+    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
+    expect(await libraryRepo.children(book.id)).toHaveLength(0)
+    // Writing the outline must not yank you into Study.
+    expect(useLibraryStore.getState().activeNodeId).toBeNull()
+  })
+
+  it('Enter on a row starts the next sibling line without +', async () => {
+    const { book } = await seedBook()
+    const chapter = await libraryRepo.create({
+      parentId: book.id,
+      type: 'chapter',
+      title: 'Bāb',
+    })
+    render(<LibraryTree variant="home" />)
+
+    const label = (await waitFor(() => screen.getByText('Bāb'))).closest('button.lib-label')
+    expect(label).toBeTruthy()
+    fireEvent.keyDown(label!, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByLabelText('Title')).toBeInTheDocument())
+    expect(await libraryRepo.children(book.id)).toHaveLength(1)
+    expect((await db.libraryNodes.get(chapter.id))?.title).toBe('Bāb')
   })
 
   it('Enter commits one node and opens the next sibling draft', async () => {
@@ -194,9 +250,15 @@ describe('LibraryTree outline editing', () => {
 
     fireEvent.click(await waitFor(() => screen.getByRole('button', { name: /Add under Kitāb/i })))
     let input = await waitFor(() => screen.getByLabelText('Title'))
-    fireEvent.change(input, { target: { value: 'L1' } })
-    fireEvent.keyDown(input, { key: 'Enter' })
+    await act(async () => {
+      fireEvent.change(input, { target: { value: 'L1' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+    })
     await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument())
+    await act(async () => {
+      await Promise.resolve()
+      await new Promise((r) => setTimeout(r, 0))
+    })
 
     // TYPE → TAB (nest) → ENTER (next draft) at each deeper level.
     for (let level = 2; level <= 6; level++) {
@@ -205,8 +267,10 @@ describe('LibraryTree outline editing', () => {
         expect(el.value).toBe('')
         return el
       })
-      fireEvent.change(input, { target: { value: `L${level}` } })
-      fireEvent.keyDown(input, { key: 'Tab' })
+      await act(async () => {
+        fireEvent.change(input, { target: { value: `L${level}` } })
+        fireEvent.keyDown(input, { key: 'Tab' })
+      })
 
       await waitFor(async () => {
         let parentId = book.id
@@ -225,9 +289,15 @@ describe('LibraryTree outline editing', () => {
       })
 
       input = screen.getByLabelText('Title')
-      fireEvent.keyDown(input, { key: 'Enter' })
+      await act(async () => {
+        fireEvent.keyDown(input, { key: 'Enter' })
+      })
       await waitFor(() => {
         expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('')
+      })
+      await act(async () => {
+        await Promise.resolve()
+        await new Promise((r) => setTimeout(r, 0))
       })
     }
 

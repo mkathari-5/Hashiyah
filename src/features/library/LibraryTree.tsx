@@ -145,6 +145,18 @@ export function LibraryTree({
   const beginDraft = useCallback(async (parent: LibraryNode, afterId: string | null = null) => {
     const type = childTypeFor(parent.type)
     if (!type) return
+    // Already drafting under this parent — just focus.
+    if (
+      sessionRef.current?.kind === 'draft' &&
+      sessionRef.current.parentId === parent.id
+    ) {
+      ignoreBlur.current = true
+      inputRef.current?.focus()
+      requestAnimationFrame(() => {
+        ignoreBlur.current = false
+      })
+      return
+    }
     await libraryRepo.update(parent.id, { collapsed: false })
     const next: DraftSession = {
       kind: 'draft',
@@ -156,6 +168,17 @@ export function LibraryTree({
     sessionRef.current = next
     setSession(next)
   }, [])
+
+  /** Notion-style: open an empty outline line under a parent without requiring +. */
+  const startWritingUnder = useCallback(
+    async (parent: LibraryNode) => {
+      if (childTypeFor(parent.type) === null) return
+      const kids = byParent.get(parent.id) ?? []
+      const last = kids[kids.length - 1]
+      await beginDraft(parent, last?.id ?? null)
+    },
+    [beginDraft, byParent],
+  )
 
   useEffect(() => {
     if (!renameRequest) return
@@ -173,6 +196,14 @@ export function LibraryTree({
       ignoreBlur.current = false
     })
   }, [session])
+
+  // Drop ephemeral draft/rename on unmount so blur cannot race the next test or route.
+  useEffect(() => {
+    return () => {
+      ignoreBlur.current = true
+      sessionRef.current = null
+    }
+  }, [])
 
   const updateSessionText = (text: string) => {
     const prev = sessionRef.current
@@ -586,7 +617,21 @@ export function LibraryTree({
                 aria-expanded={expanded}
                 onClick={(e) => {
                   e.stopPropagation()
+                  const collapsing = expanded
                   void toggleExpanded(node.id, expanded)
+                  if (collapsing) {
+                    // Drop an empty in-progress line when closing the parent.
+                    if (
+                      sessionRef.current?.kind === 'draft' &&
+                      sessionRef.current.parentId === node.id &&
+                      !sessionRef.current.text.trim()
+                    ) {
+                      clearSession()
+                    }
+                  } else if (canAdd && children.length === 0) {
+                    // Notion toggle: open → ready to type. No + required.
+                    void beginDraft(node, null)
+                  }
                 }}
               >
                 <Icon name="chevron-right" className={`h-3 w-3 ${expanded ? 'rotate-90' : ''}`} />
@@ -598,11 +643,34 @@ export function LibraryTree({
             <button
               type="button"
               className="lib-label"
-              onClick={() => void openNode(node.id)}
+              onClick={() => {
+                // Empty book/folder/etc.: expand and type like a Notion toggle.
+                // Study items (chapters…) still open Study on click.
+                if (canAdd && children.length === 0 && isContainerType(node.type)) {
+                  void beginDraft(node, null)
+                  return
+                }
+                void openNode(node.id)
+              }}
               onDoubleClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
                 beginRename(node)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' || e.shiftKey) return
+                e.preventDefault()
+                e.stopPropagation()
+                // Notion outline: Enter starts a new line at this level (sibling).
+                // To write inside an empty item, expand or click the container.
+                if (node.parentId) {
+                  const parent = byId.get(node.parentId)
+                  if (parent && childTypeFor(parent.type)) {
+                    void beginDraft(parent, node.id)
+                    return
+                  }
+                }
+                if (canAdd) void startWritingUnder(node)
               }}
               title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Untitled'}
             >
@@ -619,7 +687,7 @@ export function LibraryTree({
                 title="Add"
                 onClick={(e) => {
                   e.stopPropagation()
-                  void beginDraft(node, null)
+                  void startWritingUnder(node)
                 }}
               >
                 <Icon name="plus" className="h-3 w-3" />
