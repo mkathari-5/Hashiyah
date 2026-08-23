@@ -22,6 +22,7 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
   const allNodes = useLiveQuery(() => libraryRepo.all(), [])
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<{ id: string; arabic?: boolean } | null>(null)
+  const [writeRequest, setWriteRequest] = useState<{ parentId: string } | null>(null)
 
   const continueWith = recent[0]
   const libraryReady = allNodes !== undefined
@@ -133,6 +134,8 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
             suppressEmpty
             renameRequest={renameRequest}
             onRenameRequestHandled={() => setRenameRequest(null)}
+            writeRequest={writeRequest}
+            onWriteRequestHandled={() => setWriteRequest(null)}
             onContextMenu={(node, event) => setMenu({ node, x: event.clientX, y: event.clientY })}
           />
         </section>
@@ -144,6 +147,10 @@ export function LibraryHome({ onImport }: { onImport: () => void }) {
           onClose={() => setMenu(null)}
           onRename={(arabic) => {
             setRenameRequest({ id: menu.node.id, arabic })
+            setMenu(null)
+          }}
+          onWrite={() => {
+            setWriteRequest({ parentId: menu.node.id })
             setMenu(null)
           }}
         />
@@ -182,12 +189,14 @@ function NodeMenu({
   y,
   onClose,
   onRename,
+  onWrite,
 }: {
   node: LibraryNode
   x: number
   y: number
   onClose: () => void
   onRename: (arabic?: boolean) => void
+  onWrite: () => void
 }) {
   const remove = async () => {
     const kids = await libraryRepo.descendants(node.id)
@@ -224,14 +233,12 @@ function NodeMenu({
         </button>
         <button
           className="block-menu-item"
-          onClick={async () => {
-            await libraryRepo.create({ parentId: node.id, type: 'notes', title: '' })
-            await libraryRepo.update(node.id, { collapsed: false })
-            onClose()
+          onClick={() => {
+            onWrite()
           }}
         >
           <Icon name="note" className="block-menu-icon" />
-          <span className="flex-1">New notes item</span>
+          <span className="flex-1">Write underneath</span>
         </button>
         <div className="block-menu-sep" />
         <button className="block-menu-item is-danger" onClick={remove}>

@@ -39,10 +39,10 @@ export function isStudyItemType(type: LibraryNodeType): boolean {
 }
 
 /**
- * Default child type when pressing + / Enter under a parent.
+ * Default child type when writing under a parent (Enter / expand-to-write).
  *
  * Never null: there is no node at which the hierarchy stops. Previously
- * `lesson` and `notes` returned null — dead ends with no `+` and no composer —
+ * `lesson` and `notes` returned null — dead ends with no create path —
  * which together with the drop rule produced the Science → Book → Chapter →
  * stop ceiling.
  */
@@ -50,6 +50,18 @@ export function childTypeFor(parentType: LibraryNodeType): LibraryNodeType | nul
   if (parentType === 'science' || parentType === 'folder') return 'book'
   // Everything from a book downwards continues as a generic study item.
   return STUDY_ITEM
+}
+
+/**
+ * Single source of truth for “this node can hold children”.
+ *
+ * Rendering, caret clicks, title clicks, keyboard outline editing and
+ * persistence all have to agree. Derive it only from `childTypeFor` so a
+ * future dead-end type cannot be nestable in the UI and unwritable in data
+ * (or the reverse).
+ */
+export function canContainChildren(type: LibraryNodeType): boolean {
+  return childTypeFor(type) !== null
 }
 
 /** Whether `childType` may sit directly under a parent of `parentType`. */

@@ -2,12 +2,13 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import {
+  canContainChildren,
   canNestUnder,
   canSitAtRoot,
   childTypeFor,
-  isContainerType,
   previousSibling,
 } from '@/features/library/libraryOutline'
+import { isLegacyEmptyTitle } from '@/features/library/legacyEmptyNodes'
 import { Icon, type IconName } from '@/features/shell/Icon'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import type { OutlineEntry } from '@/services/notes/NotesService'
@@ -38,10 +39,17 @@ export function NodeTitle({
   className?: string
 }) {
   const hasBoth = !!node.title && !!node.arabicTitle
-  const displayTitle = node.title || (node.arabicTitle ? '' : 'Untitled')
+  // Never paint the word “Untitled” for a blank stored title — that label was
+  // how leftover composer rows impersonated real items. A node whose chosen
+  // title *is* “Untitled” still has that string in `node.title`.
+  const displayTitle = node.title
+  const recover = isLegacyEmptyTitle(node)
   return (
     <span className={`lib-title ${className}`}>
       {displayTitle && <bdi className="lib-title-latin">{displayTitle}</bdi>}
+      {recover && (
+        <span className="lib-title-recover" aria-label="Empty title" />
+      )}
       {hasBoth && (
         <span className="lib-title-sep" aria-hidden>
           —
@@ -85,6 +93,9 @@ interface TreeProps {
   suppressEmpty?: boolean
   renameRequest?: { id: string; arabic?: boolean } | null
   onRenameRequestHandled?: () => void
+  /** Start writing under this parent (context menu), same draft path as expand. */
+  writeRequest?: { parentId: string } | null
+  onWriteRequestHandled?: () => void
 }
 
 const OUTLINE_LIMIT = 8
@@ -97,6 +108,8 @@ export function LibraryTree({
   suppressEmpty = false,
   renameRequest,
   onRenameRequestHandled,
+  writeRequest,
+  onWriteRequestHandled,
 }: TreeProps) {
   const nodes = useLiveQuery(() => libraryRepo.all(), [])
   const activeNodeId = useLibraryStore((s) => s.activeNodeId)
@@ -143,6 +156,7 @@ export function LibraryTree({
   }, [])
 
   const beginDraft = useCallback(async (parent: LibraryNode, afterId: string | null = null) => {
+    if (!canContainChildren(parent.type)) return
     const type = childTypeFor(parent.type)
     if (!type) return
     // Already drafting under this parent — just focus.
@@ -169,10 +183,10 @@ export function LibraryTree({
     setSession(next)
   }, [])
 
-  /** Notion-style: open an empty outline line under a parent without requiring +. */
+  /** Notion-style: open an empty outline line under a parent. */
   const startWritingUnder = useCallback(
     async (parent: LibraryNode) => {
-      if (childTypeFor(parent.type) === null) return
+      if (!canContainChildren(parent.type)) return
       const kids = byParent.get(parent.id) ?? []
       const last = kids[kids.length - 1]
       await beginDraft(parent, last?.id ?? null)
@@ -187,6 +201,13 @@ export function LibraryTree({
     beginRename(node, !!renameRequest.arabic)
     onRenameRequestHandled?.()
   }, [renameRequest, byId, onRenameRequestHandled, beginRename])
+
+  useEffect(() => {
+    if (!writeRequest) return
+    const parent = byId.get(writeRequest.parentId)
+    if (parent) void startWritingUnder(parent)
+    onWriteRequestHandled?.()
+  }, [writeRequest, byId, onWriteRequestHandled, startWritingUnder])
 
   useEffect(() => {
     if (!session) return
@@ -225,10 +246,14 @@ export function LibraryTree({
     const afterIndex = draft.afterId
       ? siblings.findIndex((s) => s.id === draft.afterId)
       : siblings.length - 1
+    const trimmed = title.trim()
+    if (!trimmed) {
+      throw new Error('Refusing to persist a blank library title')
+    }
     const node = await libraryRepo.create({
       parentId: draft.parentId,
       type: draft.type,
-      title,
+      title: trimmed,
     })
     const index = Math.max(0, afterIndex + 1)
     await libraryRepo.move(node.id, draft.parentId, index)
@@ -320,7 +345,9 @@ export function LibraryTree({
         }
 
         if (!liveText.trim()) {
-          clearSession()
+          // Blank Enter keeps the ephemeral line so you can keep typing.
+          // Blur / collapse (nextSibling false) just dismisses it.
+          if (!opts.nextSibling) clearSession()
           return
         }
 
@@ -478,67 +505,67 @@ export function LibraryTree({
     text: string
     arabic: boolean
     onChange: (value: string) => void
-    showCaret: boolean
     expanded?: boolean
+    rowType: LibraryNodeType
+    draft?: boolean
   }) => (
     <div
-      className="lib-row is-editing"
+      className={`lib-row is-editing lib-row-${opts.rowType}${opts.draft ? ' is-draft' : ''}`}
+      data-lib-row={opts.draft ? 'draft' : 'rename'}
       style={{ paddingInlineStart: `${opts.depth * 0.85 + 0.35}rem` }}
     >
-      {opts.showCaret ? (
-        <span className="lib-caret" aria-hidden>
-          <Icon name="chevron-right" className={`h-3 w-3 ${opts.expanded ? 'rotate-90' : ''}`} />
-        </span>
-      ) : (
-        <span className="lib-caret" aria-hidden />
-      )}
-      <input
-        ref={inputRef}
-        className={`lib-inline-input ${opts.arabic ? 'font-arabic' : ''}`}
-        dir={opts.arabic ? 'rtl' : 'auto'}
-        value={opts.text}
-        placeholder=""
-        aria-label={opts.arabic ? 'Arabic title' : 'Title'}
-        onChange={(e) => opts.onChange(e.target.value)}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          e.stopPropagation()
-          const rawText = (e.currentTarget as HTMLInputElement).value
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            ignoreBlur.current = true
-            void commitSession({
-              nextSibling: !opts.arabic,
-              cancel: false,
-              rawText,
-            })
-          } else if (e.key === 'Escape') {
-            e.preventDefault()
-            ignoreBlur.current = true
-            void commitSession({ nextSibling: false, cancel: true, rawText })
-          } else if (e.key === 'Tab') {
-            e.preventDefault()
-            void handleTab(e.shiftKey, rawText)
-          } else if (e.key === 'Backspace' && rawText === '' && !opts.arabic) {
-            e.preventDefault()
-            ignoreBlur.current = true
+      <span className="lib-caret" aria-hidden>
+        <Icon name="chevron-right" className={`h-3 w-3 ${opts.expanded ? 'rotate-90' : ''}`} />
+      </span>
+      <span className="lib-label">
+        <input
+          ref={inputRef}
+          className={`lib-title-input ${opts.arabic ? 'font-arabic' : ''}`}
+          dir={opts.arabic ? 'rtl' : 'auto'}
+          value={opts.text}
+          placeholder=""
+          aria-label={opts.arabic ? 'Arabic title' : 'Title'}
+          onChange={(e) => opts.onChange(e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation()
+            const rawText = (e.currentTarget as HTMLInputElement).value
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              ignoreBlur.current = true
+              void commitSession({
+                nextSibling: !opts.arabic,
+                cancel: false,
+                rawText,
+              })
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              ignoreBlur.current = true
+              void commitSession({ nextSibling: false, cancel: true, rawText })
+            } else if (e.key === 'Tab') {
+              e.preventDefault()
+              void handleTab(e.shiftKey, rawText)
+            } else if (e.key === 'Backspace' && rawText === '' && !opts.arabic) {
+              e.preventDefault()
+              ignoreBlur.current = true
+              void commitSession({
+                nextSibling: false,
+                cancel: true,
+                focusPrevious: true,
+                rawText,
+              })
+            }
+          }}
+          onBlur={() => {
+            if (ignoreBlur.current) return
             void commitSession({
               nextSibling: false,
-              cancel: true,
-              focusPrevious: true,
-              rawText,
+              cancel: false,
+              rawText: inputRef.current?.value,
             })
-          }
-        }}
-        onBlur={() => {
-          if (ignoreBlur.current) return
-          void commitSession({
-            nextSibling: false,
-            cancel: false,
-            rawText: inputRef.current?.value,
-          })
-        }}
-      />
+          }}
+        />
+      </span>
     </div>
   )
 
@@ -551,7 +578,9 @@ export function LibraryTree({
           text: session.text,
           arabic: false,
           onChange: updateSessionText,
-          showCaret: false,
+          expanded: false,
+          rowType: session.type,
+          draft: true,
         })}
       </li>
     )
@@ -559,10 +588,9 @@ export function LibraryTree({
 
   const renderNode = (node: LibraryNode, depth: number): React.ReactNode => {
     const children = byParent.get(node.id) ?? []
-    const isContainer = isContainerType(node.type)
+    const nestable = canContainChildren(node.type)
     const expanded = !node.collapsed
     const selected = activeNodeId === node.id
-    const canAdd = childTypeFor(node.type) !== null
     const renaming =
       session?.kind === 'rename' && session.nodeId === node.id ? session : null
     const showChildren = expanded || (session?.kind === 'draft' && session.parentId === node.id)
@@ -575,8 +603,8 @@ export function LibraryTree({
             text: renaming.text,
             arabic: renaming.arabic,
             onChange: updateSessionText,
-            showCaret: isContainer || children.length > 0,
             expanded,
+            rowType: node.type,
           })
         ) : (
           <div
@@ -609,7 +637,7 @@ export function LibraryTree({
               onContextMenu(node, e)
             }}
           >
-            {isContainer || children.length > 0 || canAdd ? (
+            {nestable || children.length > 0 ? (
               <button
                 type="button"
                 className="lib-caret"
@@ -620,7 +648,6 @@ export function LibraryTree({
                   const collapsing = expanded
                   void toggleExpanded(node.id, expanded)
                   if (collapsing) {
-                    // Drop an empty in-progress line when closing the parent.
                     if (
                       sessionRef.current?.kind === 'draft' &&
                       sessionRef.current.parentId === node.id &&
@@ -628,8 +655,7 @@ export function LibraryTree({
                     ) {
                       clearSession()
                     }
-                  } else if (canAdd && children.length === 0) {
-                    // Notion toggle: open → ready to type. No + required.
+                  } else if (nestable && children.length === 0) {
                     void beginDraft(node, null)
                   }
                 }}
@@ -644,9 +670,9 @@ export function LibraryTree({
               type="button"
               className="lib-label"
               onClick={() => {
-                // Empty book/folder/etc.: expand and type like a Notion toggle.
-                // Study items (chapters…) still open Study on click.
-                if (canAdd && children.length === 0 && isContainerType(node.type)) {
+                // Empty nestable node: write in the tree. Study is a click on
+                // an item that already has children (or notes, via openNode).
+                if (nestable && children.length === 0 && !node.noteId) {
                   void beginDraft(node, null)
                   return
                 }
@@ -661,38 +687,22 @@ export function LibraryTree({
                 if (e.key !== 'Enter' || e.shiftKey) return
                 e.preventDefault()
                 e.stopPropagation()
-                // Notion outline: Enter starts a new line at this level (sibling).
-                // To write inside an empty item, expand or click the container.
                 if (node.parentId) {
                   const parent = byId.get(node.parentId)
-                  if (parent && childTypeFor(parent.type)) {
+                  if (parent && canContainChildren(parent.type)) {
                     void beginDraft(parent, node.id)
                     return
                   }
                 }
-                if (canAdd) void startWritingUnder(node)
+                if (nestable) void startWritingUnder(node)
               }}
-              title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Untitled'}
+              title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Empty title'}
             >
               {node.type === 'book' && <Icon name={ICONS.book} className="lib-icon" />}
               <NodeTitle node={node} />
               {node.favorite && <Icon name="star" className="lib-star" />}
             </button>
 
-            {canAdd && (
-              <button
-                type="button"
-                className="lib-add"
-                aria-label={`Add under ${node.title || 'item'}`}
-                title="Add"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  void startWritingUnder(node)
-                }}
-              >
-                <Icon name="plus" className="h-3 w-3" />
-              </button>
-            )}
             {onContextMenu && (
               <button
                 type="button"

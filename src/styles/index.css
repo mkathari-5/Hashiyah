@@ -111,7 +111,7 @@
   /* One focus treatment everywhere, always visible, never a fuzzy glow.
      Library outline editing is an exception: the caret alone is the focus signal,
      so a focus ring would look like a bordered form field inside the tree. */
-  :focus-visible:not(.lib-inline-input) {
+  :focus-visible:not(.lib-title-input) {
     outline: 2px solid var(--color-accent);
     outline-offset: 1px;
     border-radius: 2px;
@@ -1808,7 +1808,6 @@ svg.block-menu-icon {
   color: color-mix(in srgb, var(--color-accent) 80%, transparent);
 }
 
-.lib-add,
 .lib-more {
   display: grid;
   place-items: center;
@@ -1819,63 +1818,62 @@ svg.block-menu-icon {
   color: var(--color-ink-faint);
   opacity: 0;
   transition: opacity 120ms ease;
-}
-.lib-more {
   font-size: 12px;
   line-height: 1;
   letter-spacing: 0.02em;
 }
-.lib-row:hover .lib-add,
 .lib-row:hover .lib-more,
-.lib-row.is-editing .lib-add,
 .lib-row.is-editing .lib-more {
   opacity: 1;
 }
-.lib-add:hover,
 .lib-more:hover {
   background: var(--color-line);
   color: var(--color-ink);
 }
 
-.lib-inline-input {
+.lib-title-input {
   flex: 1;
   min-width: 0;
   width: 100%;
-  height: 1.45rem;
   margin: 0;
   padding: 0;
-  border: 0 !important;
+  border: 0;
   border-radius: 0;
-  background: transparent !important;
-  color: var(--color-ink);
+  background: transparent;
+  color: inherit;
   font: inherit;
-  font-size: 12.5px;
+  font-size: inherit;
   line-height: 1.45;
-  outline: none !important;
-  outline-offset: 0 !important;
-  box-shadow: none !important;
+  outline: none;
+  box-shadow: none;
   appearance: none;
   -webkit-appearance: none;
   caret-color: var(--color-ink);
 }
-.lib-inline-input:focus,
-.lib-inline-input:focus-visible,
-.lib-inline-input:active {
-  border: 0 !important;
-  outline: none !important;
-  outline-offset: 0 !important;
-  box-shadow: none !important;
-  background: transparent !important;
+.lib-title-input:focus,
+.lib-title-input:focus-visible,
+.lib-title-input:active {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
 }
-.lib-inline-input::placeholder {
+.lib-title-input::placeholder {
   color: transparent;
 }
 .lib-row.is-editing {
   background: transparent;
 }
+.lib-row.is-editing:hover {
+  background: var(--color-hover);
+}
 .lib-row.is-editing:focus-within {
   outline: none;
   box-shadow: none;
+}
+.lib-title-recover {
+  flex: 1;
+  min-height: 1.1em;
 }
 
 /* §E42 — science reads louder than book, book louder than chapter. */
@@ -1927,40 +1925,52 @@ svg.block-menu-icon {
   text-overflow: ellipsis;
 }
 
-.lib-row-science > .lib-label .lib-title {
+.lib-row-science > .lib-label .lib-title,
+.lib-row-science > .lib-label .lib-title-input {
   font-size: 13.5px;
   font-weight: 600;
   color: var(--color-ink);
   letter-spacing: -0.005em;
 }
 .lib-row-book > .lib-label .lib-title,
-.lib-row-course > .lib-label .lib-title {
+.lib-row-course > .lib-label .lib-title,
+.lib-row-book > .lib-label .lib-title-input,
+.lib-row-course > .lib-label .lib-title-input {
   font-size: 12.5px;
   font-weight: 550;
   color: var(--color-ink);
 }
 .lib-row-chapter > .lib-label .lib-title,
 .lib-row-lesson > .lib-label .lib-title,
-.lib-row-notes > .lib-label .lib-title {
+.lib-row-notes > .lib-label .lib-title,
+.lib-row-chapter > .lib-label .lib-title-input,
+.lib-row-lesson > .lib-label .lib-title-input,
+.lib-row-notes > .lib-label .lib-title-input {
   font-size: 12px;
   font-weight: 400;
 }
 
 /* The library home is a reading room, not a file tree: the same hierarchy,
    set two steps larger, with the sciences given room to breathe. */
-.lib-tree-home > li > .lib-row .lib-title {
+.lib-tree-home > li > .lib-row .lib-title,
+.lib-tree-home > li > .lib-row .lib-title-input {
   font-size: 15px;
 }
 .lib-tree-home > li + li {
   margin-top: 0.35rem;
 }
 .lib-tree-home .lib-row-book > .lib-label .lib-title,
-.lib-tree-home .lib-row-course > .lib-label .lib-title {
+.lib-tree-home .lib-row-course > .lib-label .lib-title,
+.lib-tree-home .lib-row-book > .lib-label .lib-title-input,
+.lib-tree-home .lib-row-course > .lib-label .lib-title-input {
   font-size: 13.5px;
 }
 .lib-tree-home .lib-row-chapter > .lib-label .lib-title,
 .lib-tree-home .lib-row-lesson > .lib-label .lib-title,
-.lib-tree-home .lib-row-notes > .lib-label .lib-title {
+.lib-tree-home .lib-row-notes > .lib-label .lib-title,
+.lib-tree-home .lib-row-chapter > .lib-label .lib-title-input,
+.lib-tree-home .lib-row-lesson > .lib-label .lib-title-input,
+.lib-tree-home .lib-row-notes > .lib-label .lib-title-input {
   font-size: 13px;
 }
 

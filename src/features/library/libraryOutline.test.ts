@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  canContainChildren,
   canNestUnder,
   childTypeFor,
   isBlankTitle,
@@ -29,10 +30,18 @@ describe('libraryOutline rules', () => {
     expect(childTypeFor('book')).toBe('chapter')
     expect(childTypeFor('course')).toBe('chapter')
     expect(childTypeFor('chapter')).toBe('chapter')
-    // `lesson` and `notes` used to return null, which made them dead ends with
-    // no `+` and no composer. Below a book nothing is a dead end any more.
+    // `lesson` and `notes` used to return null, which made them dead ends.
+    // Below a book nothing is a dead end any more.
     expect(childTypeFor('lesson')).toBe('chapter')
     expect(childTypeFor('notes')).toBe('chapter')
+  })
+
+  it('treats every library type as nestable via canContainChildren', () => {
+    const types = ['science', 'folder', 'book', 'course', 'chapter', 'lesson', 'notes'] as const
+    for (const type of types) {
+      expect(canContainChildren(type)).toBe(true)
+      expect(canContainChildren(type)).toBe(childTypeFor(type) !== null)
+    }
   })
 
   it('allows Tab-indent only when the structure is valid', () => {

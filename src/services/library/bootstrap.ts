@@ -1,6 +1,7 @@
 import { db } from '@/db/db'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { notesRepo } from '@/db/repos/notes'
+import { purgeLegacyEmptyPlaceholders } from '@/features/library/legacyEmptyNodes'
 import { normalizeForSearch } from '@/lib/arabic'
 import type { LibraryNode } from '@/types'
 export type { LibraryNode }
@@ -42,6 +43,8 @@ export interface BootstrapResult {
   alreadyPresent: boolean
   /** Nodes merged away by the repair pass. Should be 0 on a healthy library. */
   repairedDuplicates: number
+  /** Blank leftover composer rows removed. Never touches titled or contentful nodes. */
+  purgedEmptyPlaceholders: number
 }
 
 /**
@@ -156,11 +159,13 @@ async function bootstrapWithin(): Promise<BootstrapResult> {
     linkedBooks: 0,
     alreadyPresent: false,
     repairedDuplicates: 0,
+    purgedEmptyPlaceholders: 0,
   }
 
   // Repair anything an earlier, racier run left behind before deciding what is
   // missing — otherwise duplicates would be treated as "already present".
   result.repairedDuplicates = await deduplicate()
+  result.purgedEmptyPlaceholders = await purgeLegacyEmptyPlaceholders()
 
   const existing = await libraryRepo.all()
   const [subjects, books] = await Promise.all([db.subjects.toArray(), db.books.toArray()])
@@ -246,7 +251,8 @@ async function bootstrapWithin(): Promise<BootstrapResult> {
     result.createdSciences === 0 &&
     result.migratedSubjects === 0 &&
     result.linkedBooks === 0 &&
-    result.repairedDuplicates === 0
+    result.repairedDuplicates === 0 &&
+    result.purgedEmptyPlaceholders === 0
 
   return result
 }
