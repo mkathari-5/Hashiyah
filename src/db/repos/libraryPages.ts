@@ -11,6 +11,7 @@ import type { LibraryBlock, LibraryBlockType, LibraryPage } from '@/types'
  */
 
 export const ROOT_LIBRARY_PAGE_ID = 'lpage_library_root'
+export const PREVIOUS_LIBRARY_PAGE_ID = 'lpage_previous_library'
 
 export interface CreateBlockInput {
   id?: string
@@ -22,6 +23,7 @@ export interface CreateBlockInput {
   expanded?: boolean
   checked?: boolean
   libraryNodeId?: string | null
+  targetPageId?: string | null
 }
 
 function sortBlocks(rows: LibraryBlock[]): LibraryBlock[] {
@@ -54,6 +56,25 @@ export const libraryPagesRepo = {
 
   updateTitle: (id: string, title: string) =>
     db.libraryPages.update(id, { title, updatedAt: Date.now() }),
+
+  async create(input: { id?: string; title: string; parentPageId: string | null }): Promise<LibraryPage> {
+    const now = Date.now()
+    const page: LibraryPage = {
+      id: input.id ?? newId('lpage'),
+      title: input.title,
+      parentPageId: input.parentPageId,
+      createdAt: now,
+      updatedAt: now,
+    }
+    try {
+      await db.libraryPages.add(page)
+    } catch {
+      const existing = await db.libraryPages.get(page.id)
+      if (existing) return existing
+      throw new Error('Failed to create a library page')
+    }
+    return page
+  },
 }
 
 export const libraryBlocksRepo = {
@@ -105,6 +126,7 @@ export const libraryBlocksRepo = {
       expanded: input.expanded ?? false,
       checked: input.checked,
       libraryNodeId: input.libraryNodeId ?? null,
+      targetPageId: input.targetPageId ?? null,
       createdAt: now,
       updatedAt: now,
     }
@@ -164,5 +186,21 @@ export const libraryBlocksRepo = {
         ),
       )
     })
+  },
+
+  /** Move a block's descendants onto another page. Direct children become roots. */
+  async moveDescendantsToPage(rootId: string, pageId: string) {
+    const descendants = await libraryBlocksRepo.descendants(rootId)
+    if (descendants.length === 0) return
+    const now = Date.now()
+    await Promise.all(
+      descendants.map((row) =>
+        db.libraryBlocks.update(row.id, {
+          pageId,
+          parentBlockId: row.parentBlockId === rootId ? null : row.parentBlockId,
+          updatedAt: now,
+        }),
+      ),
+    )
   },
 }

@@ -32,9 +32,13 @@ function pressEnter(el: HTMLElement) {
   fireEvent.keyDown(el, { key: 'Enter' })
 }
 
-function emptyText() {
-  const el = screen.getAllByLabelText('Text').find((node) => (node as HTMLTextAreaElement).value === '')
-  if (!el) throw new Error('No empty text block')
+function emptyText(parentId = '') {
+  const el = screen.getAllByLabelText('Text').find((node) => {
+    const area = node as HTMLTextAreaElement
+    if (area.value !== '') return false
+    return node.closest('[data-parent-id]')?.getAttribute('data-parent-id') === parentId
+  })
+  if (!el) throw new Error(`No empty text block for parent "${parentId}"`)
   return el
 }
 
@@ -61,6 +65,19 @@ describe('Library page editor', () => {
     expect(text.closest('[data-transient="true"]')).toBeTruthy()
     expect(text.closest('[data-block-type="text"]')?.querySelector('.page-block-caret')).toBeNull()
     expect(await stored()).toHaveLength(0)
+  })
+
+  it('Enter at the start of a line does not persist a blank', async () => {
+    const first = await editorReady()
+    fill(first, 'Keep')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Keep'))
+    const el = screen.getByDisplayValue('Keep') as HTMLTextAreaElement
+    el.setSelectionRange(0, 0)
+    fireEvent.keyDown(el, { key: 'Enter' })
+    await waitFor(() => emptyText())
+    const rows = await stored()
+    expect(rows.filter((b) => b.content === 'Keep')).toHaveLength(1)
+    expect(rows.filter((b) => b.type === 'text' && !b.content.trim())).toHaveLength(0)
   })
 
   it('Enter creates a sibling text block, not a child, and does not persist blanks', async () => {
@@ -131,8 +148,13 @@ describe('Library page editor', () => {
     expect(toggleRow?.querySelector('.page-block-caret')).toBeTruthy()
     expect(document.querySelectorAll('.page-block-text .page-block-caret')).toHaveLength(0)
     fireEvent.click(screen.getByLabelText('Expand'))
-    await waitFor(() => expect(screen.getByLabelText('Collapse')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId('toggle-child-editor')).toBeInTheDocument())
+    const nested = screen.getByTestId('toggle-child-editor')
+    expect(nested.querySelector('.page-block-input')).toHaveAttribute('placeholder', "Type '/' for commands")
     const rows = await stored()
+    expect(nested.getAttribute('data-parent-id')).toBe(rows[0]?.id)
+    expect(nested.getAttribute('data-depth')).toBe('1')
+    expect(nested.getAttribute('data-indent')).toBe('1.5')
     expect(rows.filter((b) => b.type === 'toggle')).toHaveLength(1)
     expect(rows.filter((b) => b.parentBlockId === rows[0]?.id)).toHaveLength(0)
   })
@@ -249,5 +271,210 @@ describe('Library page editor', () => {
     fireEvent.keyDown(third, { key: 'Enter' })
     await screen.findByLabelText('Bulleted list')
     expect((await stored()).map((b) => b.type)).toEqual(expect.arrayContaining(['quote', 'todo', 'bullet']))
+  })
+
+  it('lets the user write, slash-convert and nest inside an expanded toggle', async () => {
+    const first = await editorReady()
+    fill(first, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(first, { key: 'Enter' })
+    fill(await screen.findByLabelText('Toggle list'), 'Book')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
+    fireEvent.click(screen.getByLabelText('Expand'))
+    const nested = await screen.findByTestId('toggle-child-editor')
+    const editor = nested.querySelector('textarea')!
+    fireEvent.click(editor)
+    await waitFor(() => expect(document.activeElement).toBe(editor))
+    fill(editor, 'Introduction')
+    const book = (await stored())[0]!
+    await waitFor(async () => {
+      const child = (await stored()).find((b) => b.content === 'Introduction')
+      expect(child?.parentBlockId).toBe(book.id)
+      expect(child?.type).toBe('text')
+    })
+
+    pressEnter(screen.getByDisplayValue('Introduction'))
+    const sibling = await waitFor(() => emptyText(book.id))
+    fill(sibling, 'Chapter One')
+    await waitFor(async () => {
+      const kids = (await stored()).filter((b) => b.parentBlockId === book.id)
+      expect(kids.map((b) => b.content)).toEqual(['Introduction', 'Chapter One'])
+    })
+
+    pressEnter(screen.getByDisplayValue('Chapter One'))
+    const third = await waitFor(() => emptyText(book.id))
+    fill(third, '/heading 2')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(third, { key: 'Enter' })
+    const heading = await screen.findByLabelText('Heading 2')
+    fill(heading, 'Part')
+    await waitFor(async () => {
+      expect((await stored()).find((b) => b.content === 'Part')?.type).toBe('heading2')
+      expect((await stored()).find((b) => b.content === 'Part')?.parentBlockId).toBe(book.id)
+    })
+
+    pressEnter(screen.getByDisplayValue('Part'))
+    const fourth = await waitFor(() => emptyText(book.id))
+    fill(fourth, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(fourth, { key: 'Enter' })
+    const section = await waitFor(() => {
+      const toggles = screen.getAllByLabelText('Toggle list')
+      expect(toggles.length).toBeGreaterThanOrEqual(2)
+      return toggles[toggles.length - 1]!
+    })
+    fill(section, 'Section One')
+    const sectionBlock = await waitFor(async () => {
+      const found = (await stored()).find((b) => b.content === 'Section One' && b.type === 'toggle')
+      expect(found).toBeTruthy()
+      return found!
+    })
+    const sectionRow = screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]') as HTMLElement
+    const expander = sectionRow.querySelector('[aria-label="Expand"]')
+    expect(expander).toBeTruthy()
+    fireEvent.click(expander!)
+    const innerEditor = await waitFor(() => emptyText(sectionBlock.id))
+    fill(innerEditor, 'Nested text')
+    await waitFor(async () => {
+      const nestedText = (await stored()).find((b) => b.content === 'Nested text')
+      expect(nestedText?.parentBlockId).toBe(sectionBlock.id)
+    })
+
+    fireEvent.click(screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Collapse"]')!)
+    await waitFor(() => expect(screen.queryByDisplayValue('Nested text')).toBeNull())
+    fireEvent.click(screen.getByLabelText('Collapse'))
+    await waitFor(() => expect(screen.queryByDisplayValue('Introduction')).toBeNull())
+    fireEvent.click(screen.getByLabelText('Expand'))
+    await waitFor(() => expect(screen.getByDisplayValue('Introduction')).toBeInTheDocument())
+    fireEvent.click(screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Expand"]')!)
+    await waitFor(() => expect(screen.getByDisplayValue('Nested text')).toBeInTheDocument())
+    expect((await stored()).every((b) => b.content !== 'Untitled')).toBe(true)
+  })
+
+  it('creates every supported type inside a toggle from the nested slash menu', async () => {
+    const first = await editorReady()
+    fill(first, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(first, { key: 'Enter' })
+    fill(await screen.findByLabelText('Toggle list'), 'Book')
+    await waitFor(async () => expect((await stored())[0]?.type).toBe('toggle'))
+    fireEvent.click(screen.getByLabelText('Expand'))
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    fill(nested, '/')
+    const menu = await screen.findByTestId('slash-menu')
+    for (const def of LIBRARY_BLOCK_CATALOGUE) {
+      expect(menu).toHaveTextContent(def.title)
+    }
+    fireEvent.mouseDown(screen.getByRole('option', { name: /^Quote$/ }))
+    await waitFor(async () => {
+      const book = (await stored()).find((b) => b.type === 'toggle')
+      expect((await stored()).some((b) => b.type === 'quote' && b.parentBlockId === book?.id)).toBe(true)
+    })
+  })
+
+  it('Backspace on an extra empty nested sibling restores focus to the previous child', async () => {
+    const first = await editorReady()
+    fill(first, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(first, { key: 'Enter' })
+    fill(await screen.findByLabelText('Toggle list'), 'Book')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
+    fireEvent.click(screen.getByLabelText('Expand'))
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    fill(nested, 'Keep')
+    await waitFor(async () => expect((await stored()).some((b) => b.content === 'Keep')).toBe(true))
+    pressEnter(screen.getByDisplayValue('Keep'))
+    const book = (await stored()).find((b) => b.type === 'toggle')!
+    const extra = await waitFor(() => emptyText(book.id))
+    fireEvent.click(extra)
+    fireEvent.keyDown(extra, { key: 'Backspace' })
+    await waitFor(() => expect(screen.queryByTestId('toggle-child-editor')).toBeNull())
+    expect(screen.getByDisplayValue('Keep')).toBeInTheDocument()
+    expect((await stored()).filter((b) => b.parentBlockId != null)).toHaveLength(1)
+  })
+
+  it('shows hover controls for only the active row without shifting text', async () => {
+    const first = await editorReady()
+    fill(first, 'Alpha')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Alpha'))
+    const alpha = screen.getByDisplayValue('Alpha').closest('.page-block') as HTMLElement
+    const trailing = (await waitFor(() => emptyText())).closest('.page-block') as HTMLElement
+    const before = alpha.style.getPropertyValue('--indent')
+    fireEvent.mouseEnter(alpha)
+    expect(alpha).toHaveClass('is-gutter-on')
+    expect(trailing).not.toHaveClass('is-gutter-on')
+    expect(alpha.style.getPropertyValue('--indent')).toBe(before)
+    fireEvent.mouseLeave(alpha)
+    fireEvent.mouseEnter(trailing)
+    expect(alpha).not.toHaveClass('is-gutter-on')
+    expect(trailing).toHaveClass('is-gutter-on')
+  })
+
+  it('uses the same indentation increment at every nesting level', async () => {
+    const first = await editorReady()
+    fill(first, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(first, { key: 'Enter' })
+    fill(await screen.findByLabelText('Toggle list'), 'Book')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
+    fireEvent.click(screen.getByLabelText('Expand'))
+    const child = (await screen.findByTestId('toggle-child-editor')) as HTMLElement
+    expect(child.dataset.depth).toBe('1')
+    expect(child.dataset.indent).toBe('1.5')
+    const nestedTa = child.querySelector('textarea')!
+    fill(nestedTa, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(nestedTa, { key: 'Enter' })
+    const innerToggle = await waitFor(() => {
+      const toggles = screen.getAllByLabelText('Toggle list')
+      expect(toggles.length).toBeGreaterThanOrEqual(2)
+      return toggles[1]!
+    })
+    fill(innerToggle, 'Section')
+    await waitFor(async () => expect((await stored()).some((b) => b.content === 'Section')).toBe(true))
+    const sectionRow = screen.getByDisplayValue('Section').closest('[data-block-type="toggle"]') as HTMLElement
+    fireEvent.click(sectionRow.querySelector('[aria-label="Expand"]')!)
+    const grand = await waitFor(() => {
+      const section = (screen.getByDisplayValue('Section').closest('[data-block-type="toggle"]') as HTMLElement)
+        .parentElement
+      const draft = section?.querySelector('[data-testid="toggle-child-editor"]') as HTMLElement | null
+      expect(draft).toBeTruthy()
+      return draft!
+    })
+    expect(grand.dataset.depth).toBe('2')
+    expect(grand.dataset.indent).toBe('3')
+  })
+
+  it('reload preserves nested content, types and parent ids', async () => {
+    const view = render(<LibraryHome onImport={() => undefined} />)
+    await screen.findByLabelText('Page title')
+    const first = await screen.findByLabelText('Text')
+    fill(first, '/toggle')
+    await screen.findByTestId('slash-menu')
+    fireEvent.keyDown(first, { key: 'Enter' })
+    fill(await screen.findByLabelText('Toggle list'), 'Book')
+    await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
+    fireEvent.click(screen.getByLabelText('Expand'))
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    fill(nested, 'Introduction')
+    await waitFor(async () => expect((await stored()).some((b) => b.content === 'Introduction')).toBe(true))
+    const book = (await stored()).find((b) => b.type === 'toggle')!
+    pressEnter(screen.getByDisplayValue('Introduction'))
+    fill(await waitFor(() => emptyText(book.id)), 'Chapter One')
+    await waitFor(async () => {
+      const kids = (await stored()).filter((b) => b.parentBlockId === book.id)
+      expect(kids.map((b) => b.content)).toEqual(['Introduction', 'Chapter One'])
+    })
+    view.unmount()
+    render(<LibraryHome onImport={() => undefined} />)
+    await waitFor(() => expect(screen.getByDisplayValue('Book')).toBeInTheDocument())
+    const caret = screen.getByDisplayValue('Book').closest('[data-block-type="toggle"]')?.querySelector('[aria-label="Expand"]')
+    if (caret) fireEvent.click(caret)
+    await waitFor(() => expect(screen.getByDisplayValue('Introduction')).toBeInTheDocument())
+    expect(screen.getByDisplayValue('Chapter One')).toBeInTheDocument()
+    const blocks = await stored()
+    expect(blocks.find((b) => b.content === 'Introduction')?.parentBlockId).toBe(book.id)
+    expect(blocks.find((b) => b.content === 'Chapter One')?.parentBlockId).toBe(book.id)
+    expect(blocks.every((b) => b.content !== 'Untitled')).toBe(true)
   })
 })

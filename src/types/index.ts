@@ -116,6 +116,7 @@ export type LibraryBlockType =
   | 'quote'
   | 'divider'
   | 'study'
+  | 'page'
 
 export interface LibraryPage {
   id: string
@@ -138,6 +139,8 @@ export interface LibraryBlock {
   checked?: boolean
   /** When set, this block opens that LibraryNode in Study. */
   libraryNodeId?: string | null
+  /** When set, this block opens another Library page. */
+  targetPageId?: string | null
   createdAt: number
   updatedAt: number
 }

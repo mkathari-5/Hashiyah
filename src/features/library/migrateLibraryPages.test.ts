@@ -1,7 +1,7 @@
 import Dexie from 'dexie'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/db'
-import { libraryBlocksRepo, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
+import { libraryBlocksRepo, libraryPagesRepo, PREVIOUS_LIBRARY_PAGE_ID, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { notesRepo } from '@/db/repos/notes'
 import { appStateRepo } from '@/db/repos/session'
@@ -79,12 +79,14 @@ describe('library page migration', () => {
 
     const blocks = await libraryBlocksRepo.forPage(ROOT_LIBRARY_PAGE_ID)
     expect(blocks.every((b) => b.content !== 'Untitled' || b.libraryNodeId === untitled.id)).toBe(true)
-    expect(blocks.some((b) => b.type === 'toggle' && b.content === PREVIOUS_LIBRARY_TITLE)).toBe(true)
-    const study = blocks.filter((b) => b.type === 'study')
+    expect(blocks.some((b) => b.type === 'page' && b.content === PREVIOUS_LIBRARY_TITLE)).toBe(true)
+    expect(blocks.some((b) => b.type === 'toggle' && b.content === PREVIOUS_LIBRARY_TITLE)).toBe(false)
+    const archive = await libraryBlocksRepo.forPage(PREVIOUS_LIBRARY_PAGE_ID)
+    const study = archive.filter((b) => b.type === 'study')
     expect(study.some((b) => b.libraryNodeId === chapter.id && b.content === 'Wudu')).toBe(true)
     expect(study.some((b) => b.libraryNodeId === leftover.id)).toBe(false)
     expect(study.filter((b) => !b.content.trim() && !b.libraryNodeId).length).toBe(0)
-    expect(blocks.filter((b) => b.type === 'toggle' && b.content === '')).toHaveLength(0)
+    expect(archive.filter((b) => b.type === 'toggle' && b.content === '')).toHaveLength(0)
   })
 
   it('leaves an empty Library page when there is nothing meaningful to import', async () => {
@@ -95,5 +97,36 @@ describe('library page migration', () => {
     expect(blocks).toHaveLength(0)
     const page = await db.libraryPages.get(ROOT_LIBRARY_PAGE_ID)
     expect(page?.title).toBe('Library')
+    expect(await db.libraryPages.get(PREVIOUS_LIBRARY_PAGE_ID)).toBeUndefined()
+  })
+
+  it('promotes a v1 Previous Library toggle into a page archive', async () => {
+    await libraryPagesRepo.ensureRoot()
+    await appStateRepo.set(LIBRARY_PAGES_MIGRATION_KEY, 1)
+    const toggle = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: PREVIOUS_LIBRARY_TITLE,
+    })
+    const node = await libraryRepo.create({ parentId: null, type: 'book', title: 'Umdat' })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      parentBlockId: toggle.id,
+      type: 'study',
+      content: 'Umdat',
+      libraryNodeId: node.id,
+    })
+
+    const result = await migrateLibraryPages()
+    expect(result.ran).toBe(true)
+    expect(await appStateRepo.get(LIBRARY_PAGES_MIGRATION_KEY, 0)).toBe(LIBRARY_PAGES_MIGRATION_VERSION)
+
+    const root = await libraryBlocksRepo.forPage(ROOT_LIBRARY_PAGE_ID)
+    expect(root.some((b) => b.type === 'page' && b.targetPageId === PREVIOUS_LIBRARY_PAGE_ID)).toBe(true)
+    expect(root.some((b) => b.type === 'toggle')).toBe(false)
+    const archive = await libraryBlocksRepo.forPage(PREVIOUS_LIBRARY_PAGE_ID)
+    expect(archive.some((b) => b.content === 'Umdat' && b.parentBlockId === null && b.libraryNodeId === node.id)).toBe(
+      true,
+    )
   })
 })

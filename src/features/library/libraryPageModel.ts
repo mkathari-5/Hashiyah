@@ -7,9 +7,14 @@ import type { LibraryBlock, LibraryBlockType } from '@/types'
  * and the tests cannot disagree.
  */
 
-export const TRANSIENT_BLOCK_ID = '__transient__'
+export const TRANSIENT_PREFIX = '__transient__'
+/** Root-level trailing draft. Nested drafts use `transientIdFor(parentId)`. */
+export const TRANSIENT_BLOCK_ID = TRANSIENT_PREFIX
 
 export const PREVIOUS_LIBRARY_TITLE = 'Previous Library'
+
+/** One rem per nesting level — the only indentation increment. */
+export const PAGE_INDENT_REM = 1.5
 
 export interface BlockDef {
   id: LibraryBlockType
@@ -30,7 +35,22 @@ export const LIBRARY_BLOCK_CATALOGUE: BlockDef[] = [
   { id: 'quote', title: 'Quote', icon: '❝', keywords: ['quote', 'blockquote', 'citation'] },
   { id: 'divider', title: 'Divider', icon: '—', keywords: ['divider', 'line', 'separator', 'hr'] },
   { id: 'study', title: 'Study page', icon: '▣', keywords: ['study', 'page', 'item', 'book', 'note'] },
+  { id: 'page', title: 'Page', icon: '▣', keywords: ['page', 'subpage', 'archive'] },
 ]
+
+export function transientIdFor(parentBlockId: string | null): string {
+  return parentBlockId ? `${TRANSIENT_PREFIX}:${parentBlockId}` : TRANSIENT_PREFIX
+}
+
+export function isTransientId(id: string): boolean {
+  return id === TRANSIENT_PREFIX || id.startsWith(`${TRANSIENT_PREFIX}:`)
+}
+
+export function parentIdFromTransientId(id: string): string | null {
+  if (id === TRANSIENT_PREFIX) return null
+  if (id.startsWith(`${TRANSIENT_PREFIX}:`)) return id.slice(TRANSIENT_PREFIX.length + 1) || null
+  return null
+}
 
 export function filterLibraryBlocks(query: string): BlockDef[] {
   const q = query.trim().toLowerCase().replace(/^\//, '')
@@ -59,8 +79,8 @@ export function stripSlashQuery(content: string): string {
   return content.replace(/(?:^|\n)\/[^\n]*$/, (chunk) => (chunk.startsWith('\n') ? '\n' : '')).replace(/\n$/, '')
 }
 
-export function isPersistableBlock(block: Pick<LibraryBlock, 'type' | 'content' | 'libraryNodeId'>): boolean {
-  if (block.type === 'divider' || block.type === 'study') return true
+export function isPersistableBlock(block: Pick<LibraryBlock, 'type' | 'content' | 'libraryNodeId' | 'targetPageId'>): boolean {
+  if (block.type === 'divider' || block.type === 'study' || block.type === 'page') return true
   if (block.type === 'text' && slashQueryFrom(block.content) !== null) return false
   if (block.type !== 'text') return true
   return block.content.trim().length > 0
@@ -155,7 +175,7 @@ export function splitContent(content: string, cursor: number): { before: string;
 
 export function makeTransientBlock(pageId: string, parentBlockId: string | null, order: number): LibraryBlock {
   return {
-    id: TRANSIENT_BLOCK_ID,
+    id: transientIdFor(parentBlockId),
     pageId,
     parentBlockId,
     type: 'text',
@@ -167,31 +187,87 @@ export function makeTransientBlock(pageId: string, parentBlockId: string | null,
   }
 }
 
-export function mergeVisible(
-  blocks: LibraryBlock[],
-  transient: LibraryBlock | null,
-): LibraryBlock[] {
-  if (!transient) return blocks
-  if (blocks.some((block) => block.id === transient.id)) return blocks
-  return [...blocks, transient]
+export function mergeVisible(blocks: LibraryBlock[], transients: LibraryBlock[]): LibraryBlock[] {
+  if (transients.length === 0) return blocks
+  const ids = new Set(blocks.map((block) => block.id))
+  return [...blocks, ...transients.filter((block) => !ids.has(block.id))]
+}
+
+/**
+ * Keep live drafts, drop drafts whose parent collapsed or vanished, and ensure
+ * an empty expanded toggle always has a nested ephemeral child.
+ */
+export function nextTransients(
+  pageId: string,
+  stored: LibraryBlock[],
+  current: Record<string, LibraryBlock>,
+  omitted: ReadonlySet<string> = new Set(),
+): Record<string, LibraryBlock> {
+  const storedIds = new Set(stored.map((block) => block.id))
+  const next: Record<string, LibraryBlock> = {}
+
+  for (const [id, block] of Object.entries(current)) {
+    if (!isTransientId(id)) continue
+    if (omitted.has(id)) continue
+    if (block.parentBlockId) {
+      const parent = stored.find((row) => row.id === block.parentBlockId)
+      if (!parent || !storedIds.has(parent.id)) continue
+      if (parent.type === 'toggle' && !parent.expanded) continue
+      if (parent.type === 'page') continue
+    }
+    next[id] = block
+  }
+
+  const rootId = transientIdFor(null)
+  const rootOrder = childrenOf(stored, null).length
+  if (!next[rootId]) {
+    next[rootId] = makeTransientBlock(pageId, null, rootOrder)
+  } else {
+    next[rootId] = { ...next[rootId], order: rootOrder }
+  }
+
+  for (const toggle of stored) {
+    if (toggle.type !== 'toggle' || !toggle.expanded) continue
+    if (childrenOf(stored, toggle.id).length > 0) continue
+    const id = transientIdFor(toggle.id)
+    if (omitted.has(id)) continue
+    if (!next[id]) next[id] = makeTransientBlock(pageId, toggle.id, 0)
+  }
+
+  return next
+}
+
+export function reconcileTransients(
+  current: Record<string, LibraryBlock>,
+  incoming: Record<string, LibraryBlock>,
+): Record<string, LibraryBlock> {
+  const currentKeys = Object.keys(current).sort().join('|')
+  const incomingKeys = Object.keys(incoming).sort().join('|')
+  if (currentKeys === incomingKeys) return current
+  const out: Record<string, LibraryBlock> = {}
+  for (const [id, block] of Object.entries(incoming)) {
+    out[id] = current[id] ?? block
+  }
+  return out
 }
 
 /**
  * Depth-first walk of currently visible blocks. Children of a collapsed
- * toggle are omitted; children of every other type stay visible.
+ * toggle or of a page link are omitted.
  */
 export function visibleBlockIds(blocks: LibraryBlock[], parentId: string | null = null): string[] {
   const out: string[] = []
   for (const block of childrenOf(blocks, parentId)) {
     out.push(block.id)
     if (block.type === 'toggle' && !block.expanded) continue
+    if (block.type === 'page') continue
     out.push(...visibleBlockIds(blocks, block.id))
   }
   return out
 }
 
 export function isTextLike(type: LibraryBlockType): boolean {
-  return type !== 'divider' && type !== 'study'
+  return type !== 'divider' && type !== 'study' && type !== 'page'
 }
 
 export function canMergeWith(previous: LibraryBlock, current: LibraryBlock): boolean {
@@ -199,12 +275,14 @@ export function canMergeWith(previous: LibraryBlock, current: LibraryBlock): boo
   return true
 }
 
-export function placeholderFor(type: LibraryBlockType): string {
-  if (type === 'toggle') return 'Toggle'
-  if (type === 'heading1' || type === 'heading2' || type === 'heading3') return 'Heading'
-  if (type === 'quote') return 'Empty quote'
-  if (type === 'todo') return 'To-do'
-  if (type === 'bullet' || type === 'numbered') return 'List'
+export function placeholderFor(type: LibraryBlockType, opts?: { focused?: boolean; transient?: boolean }): string {
+  const active = opts?.focused || opts?.transient
+  if (type === 'toggle') return active ? 'Toggle' : ''
+  if (type === 'heading1' || type === 'heading2' || type === 'heading3') return active ? 'Heading' : ''
+  if (type === 'quote') return active ? 'Empty quote' : ''
+  if (type === 'todo') return active ? 'To-do' : ''
+  if (type === 'bullet' || type === 'numbered') return active ? 'List' : ''
+  if (type === 'page') return active ? 'Page' : ''
   return "Type '/' for commands"
 }
 

@@ -1561,24 +1561,46 @@ svg.block-menu-icon {
 
 /* ── Page editor (Library Home) ─────────────────────────────────────────── */
 .page-editor {
-  max-width: 48rem;
+  --page-gutter: 2.75rem;
+  --page-marker: 1.4rem;
+  --page-indent: 1.5rem;
+  max-width: 52rem;
   margin-inline: auto;
-  padding: 4.5rem 5.5rem 8rem;
+  padding: 3.75rem 3.5rem 8rem;
   min-height: 100%;
 }
 .page-editor-loading {
   font-size: 13px;
   color: var(--color-ink-faint);
 }
+.page-editor-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin: 0 0 0.85rem calc(var(--page-gutter) + var(--page-marker));
+  padding: 0.15rem 0.25rem;
+  border-radius: 4px;
+  color: var(--color-ink-muted);
+  font-size: 13px;
+}
+.page-editor-back:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.page-editor-back-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  transform: rotate(180deg);
+}
 .page-title {
   display: block;
-  width: 100%;
-  margin: 0 0 1.75rem;
-  padding: 0.15rem 0.15rem 0.35rem;
+  width: calc(100% - var(--page-gutter) - var(--page-marker));
+  margin: 0 0 1.25rem calc(var(--page-gutter) + var(--page-marker));
+  padding: 0.1rem 0 0.35rem;
   border: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 2.5rem;
+  font-size: 2.45rem;
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.15;
@@ -1590,7 +1612,7 @@ svg.block-menu-icon {
   font-weight: 650;
 }
 .page-editor-body {
-  min-height: 50vh;
+  min-height: 40vh;
 }
 .page-block-list {
   margin: 0;
@@ -1599,17 +1621,23 @@ svg.block-menu-icon {
 }
 .page-block-list .page-block-list {
   margin: 0;
+  padding: 0;
 }
 
 .page-block {
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 0.15rem;
   min-height: 1.85rem;
   margin: 1px 0;
-  padding: 0.12rem 0.2rem 0.12rem 0;
-  padding-inline-start: calc(2.5rem + var(--indent, 0rem));
+  padding: 0.1rem 0.2rem 0.1rem 0;
+  padding-inline-start: calc(var(--page-gutter) + var(--indent, 0rem));
+  cursor: text;
+}
+.page-block-study,
+.page-block-page,
+.page-block-divider {
+  cursor: pointer;
 }
 .page-block.is-drop {
   box-shadow: inset 0 2px 0 var(--color-accent);
@@ -1621,16 +1649,17 @@ svg.block-menu-icon {
 .page-block-gutter {
   position: absolute;
   inset-inline-start: var(--indent, 0rem);
-  top: 0.1rem;
+  top: 0.15rem;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.05rem;
+  width: var(--page-gutter);
+  height: 1.55rem;
   opacity: 0;
   pointer-events: none;
 }
-.page-block:hover .page-block-gutter,
-.page-block.is-focused .page-block-gutter,
-.page-block:focus-within .page-block-gutter {
+.page-block.is-gutter-on > .page-block-gutter {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1638,8 +1667,8 @@ svg.block-menu-icon {
 .page-block-handle {
   display: grid;
   place-items: center;
-  width: 1.35rem;
-  height: 1.35rem;
+  width: 1.25rem;
+  height: 1.25rem;
   border-radius: 4px;
   color: var(--color-ink-faint);
 }
@@ -1655,33 +1684,49 @@ svg.block-menu-icon {
   cursor: grabbing;
 }
 
+.page-block-marker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--page-marker);
+  min-height: 1.7rem;
+}
 .page-block-caret {
   display: grid;
   place-items: center;
-  width: 1.35rem;
-  height: 1.7rem;
-  margin-top: 0.05rem;
+  width: 1.25rem;
+  height: 1.25rem;
   color: var(--color-ink-faint);
   border-radius: 4px;
-  flex-shrink: 0;
 }
 .page-block-caret:hover {
   background: var(--color-hover);
   color: var(--color-ink);
 }
-
+.page-block-caret-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  transition: transform 120ms ease;
+}
+.page-block-caret-icon.is-expanded {
+  transform: rotate(90deg);
+}
+.page-block-type-icon {
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--color-ink-muted);
+}
 .page-block-bullet,
 .page-block-number {
-  flex-shrink: 0;
-  width: 1.35rem;
-  padding-top: 0.28rem;
+  width: 100%;
   font-size: 0.95rem;
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--color-ink-muted);
   text-align: center;
 }
 .page-block-check {
-  margin: 0.42rem 0.35rem 0 0.15rem;
+  margin: 0;
   accent-color: var(--color-accent);
 }
 .page-block-rule {
@@ -1690,25 +1735,27 @@ svg.block-menu-icon {
   border: none;
   border-top: 1px solid var(--color-line-strong);
 }
-.page-block-study {
+.page-block-study,
+.page-block-page {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.45rem;
   width: 100%;
-  margin: 0.15rem 0;
-  padding: 0.55rem 0.7rem;
-  border: 1px solid var(--color-line);
+  min-height: 2rem;
+  margin: 0.1rem 0;
+  padding: 0.35rem 0.45rem;
   border-radius: 6px;
-  background: var(--color-panel);
   color: var(--color-ink);
   text-align: start;
+  cursor: pointer;
 }
+.page-block-page:hover,
 .page-block-study:hover {
-  border-color: var(--color-line-strong);
   background: var(--color-hover);
 }
-.page-block-study-title {
-  font-size: 14.5px;
+.page-block-study-title,
+.page-block-page-title {
+  font-size: 15px;
   font-weight: 550;
 }
 
@@ -1716,8 +1763,9 @@ svg.block-menu-icon {
   flex: 1;
   width: 100%;
   min-width: 0;
+  min-height: 1.7rem;
   margin: 0;
-  padding: 0.2rem 0.15rem;
+  padding: 0.18rem 0.1rem;
   border: none;
   background: transparent;
   resize: none;
@@ -1726,35 +1774,43 @@ svg.block-menu-icon {
   font-size: 16px;
   line-height: 1.6;
   color: var(--color-ink);
+  caret-color: var(--color-ink);
   outline: none;
+  box-shadow: none;
+  cursor: text;
+}
+.page-block-input:focus {
+  outline: none;
+  box-shadow: none;
 }
 .page-block-input::placeholder {
   color: var(--color-ink-faint);
+  font-weight: 400;
+  font-style: normal;
 }
 .page-block-input-heading1 {
   font-size: 1.85rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.25;
-  padding-top: 0.45rem;
-  padding-bottom: 0.15rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.1rem;
 }
 .page-block-input-heading2 {
   font-size: 1.4rem;
   font-weight: 650;
   letter-spacing: -0.015em;
   line-height: 1.3;
-  padding-top: 0.3rem;
+  padding-top: 0.25rem;
 }
 .page-block-input-heading3 {
   font-size: 1.15rem;
   font-weight: 650;
   line-height: 1.35;
-  padding-top: 0.2rem;
+  padding-top: 0.15rem;
 }
 .page-block-input-quote {
-  margin-inline-start: 0.15rem;
-  padding-inline-start: 0.85rem;
+  padding-inline-start: 0.75rem;
   border-inline-start: 3px solid var(--color-line-strong);
   color: var(--color-ink-muted);
   font-style: italic;
@@ -1766,9 +1822,10 @@ svg.block-menu-icon {
 .page-editor-tail {
   display: block;
   width: 100%;
-  min-height: 12rem;
+  min-height: 10rem;
   margin: 0;
   padding: 0;
+  padding-inline-start: calc(var(--page-gutter) + var(--page-marker));
   border: none;
   background: transparent;
   cursor: text;
@@ -1788,12 +1845,13 @@ svg.block-menu-icon {
 
 @media (max-width: 1100px) {
   .page-editor {
-    padding: 2.5rem 3.25rem 5rem;
+    padding: 2.25rem 2rem 5rem;
   }
 }
 @media (max-width: 860px) {
   .page-editor {
-    padding: 1.75rem 2.5rem 4rem;
+    --page-gutter: 2.35rem;
+    padding: 1.5rem 1.25rem 4rem;
   }
   .page-title {
     font-size: 2rem;

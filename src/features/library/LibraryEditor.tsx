@@ -10,26 +10,32 @@ import {
   filterLibraryBlocks,
   indentPlacement,
   isPersistableBlock,
+  isTransientId,
   makeTransientBlock,
   mergeVisible,
+  nextTransients,
   outdentPlacement,
+  parentIdFromTransientId,
+  reconcileTransients,
   slashQueryFrom,
   splitContent,
   stripSlashQuery,
   TRANSIENT_BLOCK_ID,
+  transientIdFor,
   visibleBlockIds,
   type BlockDef,
 } from '@/features/library/libraryPageModel'
 import { ensureLibraryPageReady } from '@/features/library/migrateLibraryPages'
 import { SlashCommandMenu } from '@/features/library/SlashCommandMenu'
+import { Icon } from '@/features/shell/Icon'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import type { LibraryBlock } from '@/types'
 
 /**
  * Notion-style page editor for Library Home.
  *
- * New lines are siblings. Nesting is Tab / drag / an explicit insert inside a
- * toggle. Expanding a toggle never creates a child.
+ * New lines are siblings. An expanded empty toggle shows an ephemeral nested
+ * editor — it is not persisted until the user types or picks a block type.
  */
 
 type SlashState = {
@@ -41,7 +47,13 @@ type SlashState = {
   left: number
 }
 
-export function LibraryEditor({ pageId }: { pageId: string }) {
+export function LibraryEditor({
+  pageId,
+  onOpenPage,
+}: {
+  pageId: string
+  onOpenPage?: (id: string) => void
+}) {
   const stored = useLiveQuery(() => libraryBlocksRepo.forPage(pageId), [pageId])
   const page = useLiveQuery(() => libraryPagesRepo.get(pageId), [pageId])
   const studyNodes = useLiveQuery(() => libraryRepo.all(), [])
@@ -49,8 +61,9 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
 
   const [ready, setReady] = useState(false)
   const [title, setTitle] = useState('Library')
-  const [transient, setTransient] = useState<LibraryBlock | null>(null)
-  const [focusId, setFocusId] = useState<string | null>(TRANSIENT_BLOCK_ID)
+  const [transients, setTransients] = useState<Record<string, LibraryBlock>>({})
+  const [focusId, setFocusId] = useState<string | null>(transientIdFor(null))
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [studyPickFor, setStudyPickFor] = useState<string | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
@@ -58,8 +71,9 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const caretRef = useRef(0)
   const chain = useRef(Promise.resolve())
-  const transientRef = useRef<LibraryBlock | null>(null)
-  transientRef.current = transient
+  const transientsRef = useRef<Record<string, LibraryBlock>>({})
+  const omittedTransients = useRef(new Set<string>())
+  transientsRef.current = transients
 
   const run = (job: () => Promise<void>) => {
     const next = chain.current.then(job).catch(() => undefined)
@@ -67,9 +81,19 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
     return next
   }
 
+  const live = () => mergeVisible(stored ?? [], Object.values(transientsRef.current))
+
   useEffect(() => {
     void ensureLibraryPageReady().then(() => setReady(true))
   }, [])
+
+  useEffect(() => {
+    omittedTransients.current = new Set()
+    setTransients({})
+    setDrafts({})
+    setFocusId(transientIdFor(null))
+    setSlash(null)
+  }, [pageId])
 
   useEffect(() => {
     if (page?.title != null) setTitle(page.title)
@@ -77,18 +101,24 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
 
   useEffect(() => {
     if (!ready || stored === undefined) return
-    if (transientRef.current) return
-    const roots = childrenOf(stored, null)
-    setTransient(makeTransientBlock(pageId, null, roots.length))
-    if (stored.length === 0) setFocusId(TRANSIENT_BLOCK_ID)
+    setTransients((current) => {
+      const incoming = nextTransients(pageId, stored, current, omittedTransients.current)
+      for (const id of [...omittedTransients.current]) {
+        const parentId = parentIdFromTransientId(id)
+        if (id === TRANSIENT_BLOCK_ID || (parentId && childrenOf(stored, parentId).length > 0)) {
+          omittedTransients.current.delete(id)
+        }
+      }
+      return reconcileTransients(current, incoming)
+    })
   }, [ready, stored, pageId])
 
   const blocks = useMemo(
     () =>
-      mergeVisible(stored ?? [], transient).map((block) =>
+      mergeVisible(stored ?? [], Object.values(transients)).map((block) =>
         drafts[block.id] != null ? { ...block, content: drafts[block.id]! } : block,
       ),
-    [stored, transient, drafts],
+    [stored, transients, drafts],
   )
 
   useEffect(() => {
@@ -130,6 +160,26 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
     void libraryPagesRepo.updateTitle(pageId, value)
   }
 
+  const putTransient = (block: LibraryBlock) => {
+    omittedTransients.current.delete(block.id)
+    setTransients((current) => ({ ...current, [block.id]: block }))
+  }
+
+  const dropTransient = (id: string) => {
+    omittedTransients.current.add(id)
+    setTransients((current) => {
+      if (!current[id]) return current
+      const { [id]: _omit, ...rest } = current
+      return rest
+    })
+    setDrafts((current) => {
+      if (current[id] == null) return current
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+  }
+
   const persistTransient = async (block: LibraryBlock): Promise<LibraryBlock> => {
     const created = await libraryBlocksRepo.create({
       pageId: block.pageId,
@@ -140,18 +190,14 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
       expanded: block.expanded,
       checked: block.checked,
       libraryNodeId: block.libraryNodeId,
+      targetPageId: block.targetPageId,
     })
-    setTransient(null)
-    setDrafts((current) => {
-      const next = { ...current }
-      delete next[TRANSIENT_BLOCK_ID]
-      return next
-    })
+    dropTransient(block.id)
     return created
   }
 
   const ensurePersisted = async (block: LibraryBlock): Promise<LibraryBlock> => {
-    if (block.id !== TRANSIENT_BLOCK_ID) return block
+    if (!isTransientId(block.id)) return block
     if (!isPersistableBlock(block)) return block
     return persistTransient(block)
   }
@@ -161,26 +207,28 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
     setDrafts((current) => ({ ...current, [id]: content }))
     const query = slashQueryFrom(content)
     if (query !== null) {
-      const el = document.querySelector(`[data-block-id="${id}"]`) as HTMLElement | null
+      const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/:/g, '\\:')
+      const el = document.querySelector(`[data-block-id="${safe}"]`) as HTMLElement | null
       if (el) placeMenu(id, 'convert', query, el)
     } else {
       setSlash((s) => (s?.blockId === id && s.mode === 'convert' ? null : s))
     }
 
     void run(async () => {
-      const current =
-        id === TRANSIENT_BLOCK_ID ? transientRef.current : blockById(mergeVisible(stored ?? [], transientRef.current), id)
+      const current = isTransientId(id)
+        ? transientsRef.current[id]
+        : blockById(live(), id)
       if (!current) return
 
-      if (id === TRANSIENT_BLOCK_ID) {
+      if (isTransientId(id)) {
         const next = { ...current, content }
         if (!isPersistableBlock(next)) {
-          setTransient(next)
+          putTransient(next)
           return
         }
         const created = await persistTransient(next)
         setDrafts((d) => {
-          const { [TRANSIENT_BLOCK_ID]: _omit, ...rest } = d
+          const { [id]: _omit, ...rest } = d
           return { ...rest, [created.id]: content }
         })
         setFocusId(created.id)
@@ -191,23 +239,56 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
     })
   }
 
+  const applyType = async (current: LibraryBlock, def: BlockDef, content: string) => {
+    let targetPageId = current.targetPageId
+    if (def.id === 'page' && !targetPageId) {
+      const child = await libraryPagesRepo.create({
+        title: content.trim() || 'Page',
+        parentPageId: pageId,
+      })
+      targetPageId = child.id
+    }
+    const patch = {
+      type: def.id,
+      content,
+      expanded: def.id === 'toggle' ? current.expanded : false,
+      targetPageId,
+    }
+    if (isTransientId(current.id)) {
+      const next = { ...current, ...patch }
+      if (!isPersistableBlock(next) && def.id === 'text') {
+        putTransient(next)
+        setFocusId(current.id)
+        return current.id
+      }
+      const created = await persistTransient(next)
+      setDrafts((d) => ({ ...d, [created.id]: content }))
+      if (def.id === 'study') setStudyPickFor(created.id)
+      setFocusId(created.id)
+      return created.id
+    }
+    await libraryBlocksRepo.update(current.id, patch)
+    setDrafts((d) => ({ ...d, [current.id]: content }))
+    if (def.id === 'study') setStudyPickFor(current.id)
+    setFocusId(current.id)
+    return current.id
+  }
+
   const convertOrInsert = async (def: BlockDef) => {
     if (!slash) return
     const { blockId, mode } = slash
     setSlash(null)
-    const current =
-      blockId === TRANSIENT_BLOCK_ID
-        ? transientRef.current
-        : blockById(mergeVisible(stored ?? [], transientRef.current), blockId)
+    const current = blockById(live(), blockId) ?? transientsRef.current[blockId]
     if (!current) return
 
-    if (mode === 'insert') {
-      const siblings = childrenOf(mergeVisible(stored ?? [], transientRef.current), current.parentBlockId)
+    const emptyDraft = isTransientId(current.id) && !current.content.trim()
+    if (mode === 'insert' && !emptyDraft) {
+      const siblings = childrenOf(live(), current.parentBlockId)
       const index = siblings.findIndex((row) => row.id === current.id) + 1
       if (def.id === 'text') {
         const next = makeTransientBlock(pageId, current.parentBlockId, index)
-        setTransient(next)
-        setFocusId(TRANSIENT_BLOCK_ID)
+        putTransient(next)
+        setFocusId(next.id)
         return
       }
       const created = await libraryBlocksRepo.create({
@@ -217,6 +298,10 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
         content: '',
         order: index,
         expanded: def.id === 'toggle' ? false : undefined,
+        targetPageId:
+          def.id === 'page'
+            ? (await libraryPagesRepo.create({ title: 'Page', parentPageId: pageId })).id
+            : undefined,
       })
       if (def.id === 'study') setStudyPickFor(created.id)
       setFocusId(created.id)
@@ -224,66 +309,76 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
     }
 
     const content = stripSlashQuery(drafts[current.id] ?? current.content)
-    if (current.id === TRANSIENT_BLOCK_ID) {
-      const next = { ...current, type: def.id, content }
-      if (!isPersistableBlock(next) && def.id === 'text') {
-        setTransient(next)
-        setFocusId(TRANSIENT_BLOCK_ID)
-        return
-      }
-      const created = await persistTransient(next)
-      setDrafts((d) => ({ ...d, [created.id]: content }))
-      if (def.id === 'study') setStudyPickFor(created.id)
-      setFocusId(created.id)
-      return
-    }
-
-    await libraryBlocksRepo.update(current.id, { type: def.id, content })
-    setDrafts((d) => ({ ...d, [current.id]: content }))
-    if (def.id === 'study') setStudyPickFor(current.id)
-    setFocusId(current.id)
+    await applyType(current, def, content)
   }
 
   const enter = async (block: LibraryBlock, caret: number) => {
     const { before, after } = splitContent(block.content, caret)
-    if (block.id === TRANSIENT_BLOCK_ID && !before.trim() && !after.trim()) return
+    if (isTransientId(block.id) && !before.trim() && !after.trim()) return
 
-    const live = await ensurePersisted({ ...block, content: before })
-    if (live.id === TRANSIENT_BLOCK_ID) {
-      setTransient({ ...block, content: before })
+    if (!before.trim() && after.trim()) {
+      const liveBlock = isTransientId(block.id)
+        ? await ensurePersisted({ ...block, content: after })
+        : block
+      if (isTransientId(liveBlock.id)) {
+        putTransient({ ...block, content: after })
+        return
+      }
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, liveBlock.order)
+      putTransient(next)
+      await libraryBlocksRepo.move(liveBlock.id, liveBlock.parentBlockId, liveBlock.order + 1)
+      setFocusId(next.id)
       return
     }
-    if (block.content !== before) await libraryBlocksRepo.update(live.id, { content: before })
 
-    const siblings = childrenOf(mergeVisible(stored ?? [], transientRef.current), live.parentBlockId)
-    const index = siblings.findIndex((row) => row.id === live.id) + 1
+    const liveBlock = await ensurePersisted({ ...block, content: before })
+    if (isTransientId(liveBlock.id)) {
+      putTransient({ ...block, content: before })
+      return
+    }
+    if (block.content !== before) {
+      await libraryBlocksRepo.update(liveBlock.id, { content: before })
+      setDrafts((d) => ({ ...d, [liveBlock.id]: before }))
+    }
+
+    const siblings = childrenOf(
+      mergeVisible(await libraryBlocksRepo.forPage(pageId), Object.values(transientsRef.current)),
+      liveBlock.parentBlockId,
+    )
+    const index = siblings.findIndex((row) => row.id === liveBlock.id) + 1
     if (!after.trim()) {
-      const next = makeTransientBlock(pageId, live.parentBlockId, index)
-      setTransient(next)
-      setFocusId(TRANSIENT_BLOCK_ID)
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, index)
+      putTransient(next)
+      setFocusId(next.id)
       return
     }
     const created = await libraryBlocksRepo.create({
       pageId,
-      parentBlockId: live.parentBlockId,
+      parentBlockId: liveBlock.parentBlockId,
       type: 'text',
       content: after,
       order: index,
     })
+    setDrafts((d) => ({ ...d, [created.id]: after }))
     setFocusId(created.id)
   }
 
-  const backspaceStart = async (block: LibraryBlock) => {
-    const all = mergeVisible(stored ?? [], transientRef.current)
+  const backspaceStart = async (block: LibraryBlock, snapshot: LibraryBlock[] = live()) => {
+    const all = snapshot
+    const siblings = childrenOf(all, block.parentBlockId)
+    const siblingIndex = siblings.findIndex((row) => row.id === block.id)
+    const prevSibling = siblingIndex > 0 ? siblings[siblingIndex - 1] : null
     const visible = visibleBlockIds(all)
     const at = visible.indexOf(block.id)
-    const prevId = at > 0 ? visible[at - 1] : null
+    const prevId = prevSibling?.id ?? (at > 0 ? visible[at - 1] : null)
     const prev = prevId ? blockById(all, prevId) : undefined
 
-    if (block.id === TRANSIENT_BLOCK_ID) {
+    if (isTransientId(block.id)) {
       if (!block.content) {
-        setTransient(null)
+        const persistedKids = childrenOf(stored ?? [], block.parentBlockId)
+        if (block.parentBlockId && persistedKids.length > 0) dropTransient(block.id)
         if (prev) setFocusId(prev.id)
+        else if (block.parentBlockId) setFocusId(block.parentBlockId)
       }
       return
     }
@@ -292,16 +387,15 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
       await libraryBlocksRepo.remove(block.id)
       if (prev) setFocusId(prev.id)
       else {
-        setTransient(makeTransientBlock(pageId, null, 0))
-        setFocusId(TRANSIENT_BLOCK_ID)
+        setFocusId(transientIdFor(null))
       }
       return
     }
 
     if (prev && canMergeWith(prev, block)) {
       const joined = `${prev.content}${block.content}`
-      if (prev.id === TRANSIENT_BLOCK_ID) {
-        setTransient({ ...prev, content: joined })
+      if (isTransientId(prev.id)) {
+        putTransient({ ...prev, content: joined })
       } else {
         await libraryBlocksRepo.update(prev.id, { content: joined })
       }
@@ -311,34 +405,31 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
   }
 
   const indent = async (block: LibraryBlock) => {
-    const live = await ensurePersisted(block)
-    if (live.id === TRANSIENT_BLOCK_ID) return
-    const all = mergeVisible((await libraryBlocksRepo.forPage(pageId)) ?? [], transientRef.current)
-    const placement = indentPlacement(live, all)
+    const persisted = await ensurePersisted(block)
+    if (isTransientId(persisted.id)) return
+    const all = mergeVisible((await libraryBlocksRepo.forPage(pageId)) ?? [], Object.values(transientsRef.current))
+    const placement = indentPlacement(persisted, all)
     if (!placement) return
-    await libraryBlocksRepo.move(live.id, placement.parentBlockId, placement.order)
+    await libraryBlocksRepo.move(persisted.id, placement.parentBlockId, placement.order)
     const parent = await libraryBlocksRepo.get(placement.parentBlockId)
     if (parent?.type === 'toggle' && !parent.expanded) {
       await libraryBlocksRepo.update(parent.id, { expanded: true })
     }
-    setFocusId(live.id)
+    setFocusId(persisted.id)
   }
 
   const outdent = async (block: LibraryBlock) => {
-    const live = await ensurePersisted(block)
-    if (live.id === TRANSIENT_BLOCK_ID) return
-    const all = mergeVisible(await libraryBlocksRepo.forPage(pageId), transientRef.current)
-    const placement = outdentPlacement(live, all)
+    const persisted = await ensurePersisted(block)
+    if (isTransientId(persisted.id)) return
+    const all = mergeVisible(await libraryBlocksRepo.forPage(pageId), Object.values(transientsRef.current))
+    const placement = outdentPlacement(persisted, all)
     if (!placement) return
-    await libraryBlocksRepo.move(live.id, placement.parentBlockId, placement.order)
-    setFocusId(live.id)
+    await libraryBlocksRepo.move(persisted.id, placement.parentBlockId, placement.order)
+    setFocusId(persisted.id)
   }
 
   const onKeyDown = (id: string, event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const block =
-      id === TRANSIENT_BLOCK_ID
-        ? transientRef.current
-        : blockById(mergeVisible(stored ?? [], transientRef.current), id)
+    const block = blockById(blocks, id) ?? transientsRef.current[id]
     if (!block) return
 
     if (slash && slash.blockId === id) {
@@ -373,10 +464,13 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
 
     if (event.key === 'Escape') {
       event.preventDefault()
-      if (block.id === TRANSIENT_BLOCK_ID && !block.content.trim() && (stored?.length ?? 0) > 0) {
-        setTransient(null)
-        const last = stored![stored!.length - 1]
-        if (last) setFocusId(last.id)
+      if (isTransientId(block.id) && !block.content.trim()) {
+        const persistedKids = childrenOf(stored ?? [], block.parentBlockId)
+        if (block.parentBlockId && persistedKids.length > 0) dropTransient(block.id)
+        const visible = visibleBlockIds(blocks)
+        const at = visible.indexOf(block.id)
+        const prev = at > 0 ? visible[at - 1] : block.parentBlockId
+        if (prev) setFocusId(prev)
       }
       return
     }
@@ -399,7 +493,7 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
       const end = event.currentTarget.selectionEnd ?? 0
       if (start === 0 && end === 0) {
         event.preventDefault()
-        void run(() => backspaceStart(block))
+        void run(() => backspaceStart(block, blocks))
       }
       return
     }
@@ -426,14 +520,16 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
 
   const onToggle = (id: string) => {
     void run(async () => {
-      const block = blockById(mergeVisible(stored ?? [], transientRef.current), id)
+      const block = blockById(live(), id)
       if (!block || block.type !== 'toggle') return
       await libraryBlocksRepo.update(id, { expanded: !block.expanded })
     })
   }
 
   const onInsert = (id: string, anchor: HTMLElement) => {
-    placeMenu(id, 'insert', '', anchor)
+    const current = blockById(blocks, id) ?? transientsRef.current[id]
+    const mode = current && isTransientId(current.id) && !current.content.trim() ? 'convert' : 'insert'
+    placeMenu(id, mode, '', anchor)
   }
 
   const onDrop = (targetId: string) => {
@@ -461,16 +557,18 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
   const activateTail = () => {
     const roots = childrenOf(blocks, null)
     const last = roots[roots.length - 1]
-    if (last?.id === TRANSIENT_BLOCK_ID) {
-      setFocusId(TRANSIENT_BLOCK_ID)
+    const rootDraft = transientIdFor(null)
+    if (last?.id === rootDraft) {
+      setFocusId(rootDraft)
       return
     }
     if (last && last.type === 'text' && !last.content.trim()) {
       setFocusId(last.id)
       return
     }
-    setTransient(makeTransientBlock(pageId, null, roots.length))
-    setFocusId(TRANSIENT_BLOCK_ID)
+    const next = makeTransientBlock(pageId, null, roots.length)
+    putTransient(next)
+    setFocusId(next.id)
   }
 
   const attachStudy = (blockId: string, nodeId: string, label: string) => {
@@ -492,11 +590,14 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
               blocks={blocks}
               depth={depth}
               focused={focusId === block.id}
+              gutterOn={hoveredId === block.id || (focusId === block.id && hoveredId === null)}
+              onHover={setHoveredId}
               onFocus={focus}
               onChange={onChange}
               onKeyDown={onKeyDown}
               onToggle={onToggle}
               onOpenStudy={(nodeId) => void openStudySession(nodeId)}
+              onOpenPage={(id) => onOpenPage?.(id)}
               onTodo={(id, checked) => void libraryBlocksRepo.update(id, { checked })}
               onInsert={onInsert}
               onDragStart={setDragId}
@@ -513,7 +614,11 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
               dragging={dragId === block.id}
               dropTarget={dropId === block.id}
             />
-            {block.type === 'toggle' && !block.expanded ? null : renderBranch(block.id, depth + 1)}
+            {block.type === 'toggle' && !block.expanded
+              ? null
+              : block.type === 'page'
+                ? null
+                : renderBranch(block.id, depth + 1)}
           </li>
         ))}
       </ul>
@@ -530,6 +635,12 @@ export function LibraryEditor({ pageId }: { pageId: string }) {
 
   return (
     <div className="page-editor" data-testid="library-page">
+      {page?.parentPageId && onOpenPage && (
+        <button type="button" className="page-editor-back" onClick={() => onOpenPage(page.parentPageId!)}>
+          <Icon name="chevron-right" className="page-editor-back-icon" />
+          Library
+        </button>
+      )}
       <input
         className="page-title"
         aria-label="Page title"
@@ -614,4 +725,3 @@ function StudyPicker({
     </div>
   )
 }
-
