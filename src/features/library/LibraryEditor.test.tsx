@@ -3,11 +3,11 @@ import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { db } from '@/db/db'
-import { libraryBlocksRepo, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
+import { libraryBlocksRepo, libraryPagesRepo, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryHome } from '@/features/library/LibraryHome'
 import { LibraryEditor } from '@/features/library/LibraryEditor'
-import { LIBRARY_BLOCK_CATALOGUE } from '@/features/library/libraryPageModel'
+import { LIBRARY_BLOCK_CATALOGUE, PREVIOUS_LIBRARY_TITLE } from '@/features/library/libraryPageModel'
 import { useLibraryStore } from '@/state/useLibraryStore'
 
 beforeEach(async () => {
@@ -32,14 +32,18 @@ function pressEnter(el: HTMLElement) {
   fireEvent.keyDown(el, { key: 'Enter' })
 }
 
-function emptyText(parentId = '') {
-  const el = screen.getAllByLabelText('Text').find((node) => {
+function emptyByLabel(label: string, parentId = '') {
+  const el = screen.getAllByLabelText(label).find((node) => {
     const area = node as HTMLTextAreaElement
-    if (area.value !== '') return false
+    if (!(area instanceof HTMLTextAreaElement) || area.value !== '') return false
     return node.closest('[data-parent-id]')?.getAttribute('data-parent-id') === parentId
   })
-  if (!el) throw new Error(`No empty text block for parent "${parentId}"`)
+  if (!el) throw new Error(`No empty ${label} block for parent "${parentId}"`)
   return el
+}
+
+function emptyText(parentId = '') {
+  return emptyByLabel('Text', parentId)
 }
 
 async function stored() {
@@ -115,11 +119,15 @@ describe('Library page editor', () => {
     fill(first, '/toggle')
     expect(await screen.findByRole('option', { name: /Toggle list/i })).toBeInTheDocument()
     fireEvent.keyDown(first, { key: 'Enter' })
-    await waitFor(() => expect(screen.getByLabelText('Toggle list')).toBeInTheDocument())
-    const rows = await stored()
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.type).toBe('toggle')
-    expect(rows[0]?.content).not.toMatch(/^\/tog/)
+    const toggle = await screen.findByLabelText('Toggle list')
+    fill(toggle, 'Aqidah')
+    await waitFor(async () => {
+      const rows = await stored()
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.type).toBe('toggle')
+      expect(rows[0]?.content).toBe('Aqidah')
+      expect(rows[0]?.content).not.toMatch(/^\/tog/)
+    })
   })
 
   it('can select every supported block type from the insert menu', async () => {
@@ -168,6 +176,8 @@ describe('Library page editor', () => {
     fill(toggle, 'Kitab at-Taharah')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Kitab at-Taharah'))
     pressEnter(await screen.findByDisplayValue('Kitab at-Taharah'))
+    const nextToggle = await waitFor(() => emptyByLabel('Toggle list'))
+    pressEnter(nextToggle)
     const child = await waitFor(() => emptyText())
     fill(child, 'Inside')
     await waitFor(async () => expect((await stored()).some((b) => b.content === 'Inside')).toBe(true))
@@ -205,6 +215,7 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Alpha')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Alpha'))
+    pressEnter(screen.getByDisplayValue('Alpha'))
     const trailing = await waitFor(() => emptyText())
     fill(trailing, 'Beta')
     await waitFor(async () => expect((await stored()).map((b) => b.content)).toEqual(['Alpha', 'Beta']))
@@ -227,7 +238,7 @@ describe('Library page editor', () => {
     await waitFor(() => expect(useLibraryStore.getState().activeNodeId).toBe(node.id))
 
     useLibraryStore.setState({ activeNodeId: null })
-    fireEvent.click(screen.getAllByLabelText('Text')[0]!)
+    fireEvent.click(screen.getByLabelText('Page title'))
     expect(useLibraryStore.getState().activeNodeId).toBeNull()
   })
 
@@ -259,18 +270,22 @@ describe('Library page editor', () => {
     const quote = await screen.findByLabelText('Quote')
     fill(quote, 'A saying')
     pressEnter(quote)
-    const next = await waitFor(() => emptyText())
+    const next = await waitFor(() => emptyByLabel('Quote'))
     fill(next, '/to-do')
     await screen.findByTestId('slash-menu')
     fireEvent.keyDown(next, { key: 'Enter' })
-    await screen.findByLabelText('To-do', { selector: 'textarea' })
-    pressEnter(screen.getByLabelText('To-do', { selector: 'textarea' }))
-    const third = await waitFor(() => emptyText())
+    const todo = await screen.findByLabelText('To-do', { selector: 'textarea' })
+    fill(todo, 'Task')
+    pressEnter(todo)
+    const third = await waitFor(() => emptyByLabel('To-do'))
     fill(third, '/bullet')
     await screen.findByTestId('slash-menu')
     fireEvent.keyDown(third, { key: 'Enter' })
-    await screen.findByLabelText('Bulleted list')
-    expect((await stored()).map((b) => b.type)).toEqual(expect.arrayContaining(['quote', 'todo', 'bullet']))
+    const bullet = await screen.findByLabelText('Bulleted list')
+    fill(bullet, 'Point')
+    await waitFor(async () => {
+      expect((await stored()).map((b) => b.type)).toEqual(expect.arrayContaining(['quote', 'todo', 'bullet']))
+    })
   })
 
   it('lets the user write, slash-convert and nest inside an expanded toggle', async () => {
@@ -366,6 +381,8 @@ describe('Library page editor', () => {
       expect(menu).toHaveTextContent(def.title)
     }
     fireEvent.mouseDown(screen.getByRole('option', { name: /^Quote$/ }))
+    const quote = await screen.findByLabelText('Quote')
+    fill(quote, 'A saying')
     await waitFor(async () => {
       const book = (await stored()).find((b) => b.type === 'toggle')
       expect((await stored()).some((b) => b.type === 'quote' && b.parentBlockId === book?.id)).toBe(true)
@@ -398,6 +415,7 @@ describe('Library page editor', () => {
     fill(first, 'Alpha')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Alpha'))
     const alpha = screen.getByDisplayValue('Alpha').closest('.page-block') as HTMLElement
+    pressEnter(screen.getByDisplayValue('Alpha'))
     const trailing = (await waitFor(() => emptyText())).closest('.page-block') as HTMLElement
     const before = alpha.style.getPropertyValue('--indent')
     fireEvent.mouseEnter(alpha)
@@ -468,6 +486,7 @@ describe('Library page editor', () => {
     view.unmount()
     render(<LibraryHome onImport={() => undefined} />)
     await waitFor(() => expect(screen.getByDisplayValue('Book')).toBeInTheDocument())
+    expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
     const caret = screen.getByDisplayValue('Book').closest('[data-block-type="toggle"]')?.querySelector('[aria-label="Expand"]')
     if (caret) fireEvent.click(caret)
     await waitFor(() => expect(screen.getByDisplayValue('Introduction')).toBeInTheDocument())
@@ -476,5 +495,219 @@ describe('Library page editor', () => {
     expect(blocks.find((b) => b.content === 'Introduction')?.parentBlockId).toBe(book.id)
     expect(blocks.find((b) => b.content === 'Chapter One')?.parentBlockId).toBe(book.id)
     expect(blocks.every((b) => b.content !== 'Untitled')).toBe(true)
+  })
+
+  it('does not show a trailing command placeholder when the page already has blocks', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'fafawf',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    await screen.findByDisplayValue('fafawf')
+    expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
+    expect(screen.queryByLabelText('Text')).toBeNull()
+  })
+
+  it('clicking blank canvas creates one transient text block that blur removes', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'fafawf',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    await screen.findByDisplayValue('fafawf')
+    fireEvent.click(screen.getByDisplayValue('fafawf'))
+    fireEvent.click(screen.getByTestId('page-editor-tail'))
+    const draft = await waitFor(() => emptyText())
+    expect(draft).toHaveAttribute('placeholder', "Type '/' for commands")
+    expect(draft.closest('[data-transient="true"]')).toBeTruthy()
+    expect(await stored()).toHaveLength(1)
+    screen.getByLabelText('Page title').focus()
+    fireEvent.blur(draft)
+    await waitFor(() => expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull())
+    expect(await stored()).toHaveLength(1)
+    expect((await stored())[0]?.content).toBe('fafawf')
+  })
+
+  it('Enter after a toggle title creates a same-level toggle sibling, not a child', async () => {
+    const aqidah = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'Aqidah',
+      expanded: false,
+    })
+    const child = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      parentBlockId: aqidah.id,
+      type: 'text',
+      content: 'Inside Aqidah',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    const title = await screen.findByDisplayValue('Aqidah')
+    pressEnter(title)
+    const sibling = await waitFor(() => emptyByLabel('Toggle list'))
+    expect(sibling.closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
+    expect(sibling.closest('[data-block-type]')?.getAttribute('data-block-type')).toBe('toggle')
+    await waitFor(() => expect(document.activeElement).toBe(sibling))
+    expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
+    fill(sibling, 'Tawhid')
+    await waitFor(async () => {
+      const rows = await stored()
+      const tawhid = rows.find((b) => b.content === 'Tawhid')
+      expect(tawhid?.type).toBe('toggle')
+      expect(tawhid?.parentBlockId).toBeNull()
+      expect(tawhid?.order).toBeGreaterThan(aqidah.order)
+      expect(rows.find((b) => b.content === 'Inside Aqidah')?.parentBlockId).toBe(aqidah.id)
+      expect(rows.filter((b) => b.parentBlockId === aqidah.id).map((b) => b.id)).toEqual([child.id])
+      expect(rows.filter((b) => !b.content.trim())).toHaveLength(0)
+      expect(rows.every((b) => b.content !== 'Untitled')).toBe(true)
+    })
+    const aqidahRow = screen.getByDisplayValue('Aqidah').closest('[data-block-type="toggle"]') as HTMLElement
+    fireEvent.click(aqidahRow.querySelector('[aria-label="Expand"]')!)
+    await waitFor(() => expect(screen.getByDisplayValue('Inside Aqidah')).toBeInTheDocument())
+    expect(screen.getByDisplayValue('Tawhid').closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
+  })
+
+  it('Enter after a collapsed or expanded toggle still creates a sibling', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'Aqidah',
+      expanded: true,
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    pressEnter(await screen.findByDisplayValue('Aqidah'))
+    const sibling = await waitFor(() => emptyByLabel('Toggle list'))
+    expect(sibling.closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
+    fill(sibling, 'Tawhid')
+    await waitFor(async () => {
+      const rows = await stored()
+      expect(rows.find((b) => b.content === 'Tawhid')?.parentBlockId).toBeNull()
+      expect(rows.find((b) => b.content === 'Tawhid')?.type).toBe('toggle')
+    })
+  })
+
+  it('Enter continues bullets, numbered items and to-dos as the same type', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'bullet',
+      content: 'First',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    pressEnter(await screen.findByDisplayValue('First'))
+    const bullet = await waitFor(() => emptyByLabel('Bulleted list'))
+    fill(bullet, 'Second')
+    await waitFor(async () => {
+      expect((await stored()).filter((b) => b.type === 'bullet').map((b) => b.content)).toEqual(['First', 'Second'])
+    })
+    pressEnter(screen.getByDisplayValue('Second'))
+    const emptyBullet = await waitFor(() => emptyByLabel('Bulleted list'))
+    pressEnter(emptyBullet)
+    await waitFor(() => expect(emptyText()).toBeTruthy())
+    await waitFor(async () => {
+      const rows = await stored()
+      expect(rows.filter((b) => b.type === 'bullet')).toHaveLength(2)
+      expect(rows.filter((b) => !b.content.trim())).toHaveLength(0)
+    })
+  })
+
+  it('Enter continues numbered items as numbered siblings', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'numbered',
+      content: 'One',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    pressEnter(await screen.findByDisplayValue('One'))
+    const next = await waitFor(() => emptyByLabel('Numbered list'))
+    fill(next, 'Two')
+    await waitFor(async () => {
+      expect((await stored()).filter((b) => b.type === 'numbered').map((b) => b.content)).toEqual(['One', 'Two'])
+    })
+  })
+
+  it('Enter continues to-dos as to-do siblings', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'todo',
+      content: 'Task',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    pressEnter(await screen.findByDisplayValue('Task'))
+    const next = await waitFor(() => emptyByLabel('To-do'))
+    fill(next, 'Next')
+    await waitFor(async () => {
+      expect((await stored()).filter((b) => b.type === 'todo').map((b) => b.content)).toEqual(['Task', 'Next'])
+    })
+  })
+
+  it('Enter in the middle of a toggle title splits it without moving children', async () => {
+    const aqidah = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'Hello World',
+    })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      parentBlockId: aqidah.id,
+      type: 'text',
+      content: 'Child',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    const el = (await screen.findByDisplayValue('Hello World')) as HTMLTextAreaElement
+    el.setSelectionRange(6, 6)
+    fireEvent.keyDown(el, { key: 'Enter' })
+    await waitFor(async () => {
+      const rows = await stored()
+      expect(rows.find((b) => b.id === aqidah.id)?.content).toBe('Hello ')
+      const next = rows.find((b) => b.content === 'World')
+      expect(next?.type).toBe('toggle')
+      expect(next?.parentBlockId).toBeNull()
+      expect(next?.order).toBeGreaterThan(rows.find((b) => b.id === aqidah.id)!.order)
+      expect(rows.find((b) => b.content === 'Child')?.parentBlockId).toBe(aqidah.id)
+    })
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByDisplayValue('World')))
+  })
+
+  it('hovering Previous Library reveals only that row’s controls without moving the title', async () => {
+    const archivePage = await libraryPagesRepo.create({
+      title: PREVIOUS_LIBRARY_TITLE,
+      parentPageId: ROOT_LIBRARY_PAGE_ID,
+    })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'page',
+      content: PREVIOUS_LIBRARY_TITLE,
+      targetPageId: archivePage.id,
+    })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'fafawf',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    const archive = (await screen.findByText(PREVIOUS_LIBRARY_TITLE)).closest('.page-block') as HTMLElement
+    const other = (await screen.findByDisplayValue('fafawf')).closest('.page-block') as HTMLElement
+    expect(archive).toHaveAttribute('data-block-type', 'page')
+    expect(archive).toHaveClass('page-block-page')
+    expect(archive.querySelector('.page-block-page-link')).toBeTruthy()
+    expect(archive.querySelector('.page-block-caret')).toBeNull()
+    const marker = archive.querySelector('[data-testid="block-marker"]')
+    const gutter = archive.querySelector('[data-testid="block-gutter"]')
+    expect(marker?.querySelector('.page-block-type-icon')).toBeTruthy()
+    expect(gutter?.querySelector('.page-block-plus')).toBeTruthy()
+    expect(gutter?.querySelector('.page-block-handle')).toBeTruthy()
+    expect(gutter?.contains(marker?.querySelector('.page-block-type-icon') as Node)).toBe(false)
+    const title = archive.querySelector('.page-block-page-title') as HTMLElement
+    const beforeLeft = title.getBoundingClientRect().left
+    fireEvent.mouseEnter(archive)
+    expect(archive).toHaveClass('is-gutter-on')
+    expect(other).not.toHaveClass('is-gutter-on')
+    expect(title.getBoundingClientRect().left).toBe(beforeLeft)
+    expect(archive.style.width).not.toBe('100vw')
+    expect(archive.parentElement?.closest('.page-editor')).toBeTruthy()
+    fireEvent.mouseLeave(archive)
+    expect(archive).not.toHaveClass('is-gutter-on')
   })
 })

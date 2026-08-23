@@ -7,13 +7,16 @@ import {
   blockById,
   canMergeWith,
   childrenOf,
+  enterContinuationType,
   filterLibraryBlocks,
   indentPlacement,
+  isContinueType,
   isPersistableBlock,
   isTransientId,
   makeTransientBlock,
   mergeVisible,
   nextTransients,
+  spliceIndexAfter,
   outdentPlacement,
   parentIdFromTransientId,
   reconcileTransients,
@@ -62,7 +65,8 @@ export function LibraryEditor({
   const [ready, setReady] = useState(false)
   const [title, setTitle] = useState('Library')
   const [transients, setTransients] = useState<Record<string, LibraryBlock>>({})
-  const [focusId, setFocusId] = useState<string | null>(transientIdFor(null))
+  const [focusId, setFocusId] = useState<string | null>(null)
+  const [focusCaret, setFocusCaret] = useState<'start' | 'end'>('end')
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [studyPickFor, setStudyPickFor] = useState<string | null>(null)
@@ -72,8 +76,14 @@ export function LibraryEditor({
   const caretRef = useRef(0)
   const chain = useRef(Promise.resolve())
   const transientsRef = useRef<Record<string, LibraryBlock>>({})
+  const storedRef = useRef<LibraryBlock[] | undefined>(undefined)
+  const slashRef = useRef<SlashState | null>(null)
   const omittedTransients = useRef(new Set<string>())
+  const focusIdRef = useRef<string | null>(null)
   transientsRef.current = transients
+  storedRef.current = stored
+  slashRef.current = slash
+  focusIdRef.current = focusId
 
   const run = (job: () => Promise<void>) => {
     const next = chain.current.then(job).catch(() => undefined)
@@ -91,7 +101,7 @@ export function LibraryEditor({
     omittedTransients.current = new Set()
     setTransients({})
     setDrafts({})
-    setFocusId(transientIdFor(null))
+    setFocusId(null)
     setSlash(null)
   }, [pageId])
 
@@ -102,7 +112,7 @@ export function LibraryEditor({
   useEffect(() => {
     if (!ready || stored === undefined) return
     setTransients((current) => {
-      const incoming = nextTransients(pageId, stored, current, omittedTransients.current)
+      const incoming = nextTransients(pageId, stored, current, omittedTransients.current, focusId)
       for (const id of [...omittedTransients.current]) {
         const parentId = parentIdFromTransientId(id)
         if (id === TRANSIENT_BLOCK_ID || (parentId && childrenOf(stored, parentId).length > 0)) {
@@ -111,7 +121,7 @@ export function LibraryEditor({
       }
       return reconcileTransients(current, incoming)
     })
-  }, [ready, stored, pageId])
+  }, [ready, stored, pageId, focusId])
 
   const blocks = useMemo(
     () =>
@@ -141,7 +151,10 @@ export function LibraryEditor({
     [slash],
   )
 
-  const focus = (id: string) => setFocusId(id)
+  const focus = (id: string, caret: 'start' | 'end' = 'end') => {
+    setFocusCaret(caret)
+    setFocusId(id)
+  }
 
   const placeMenu = (blockId: string, mode: SlashState['mode'], query: string, anchor: HTMLElement) => {
     const rect = anchor.getBoundingClientRect()
@@ -162,15 +175,19 @@ export function LibraryEditor({
 
   const putTransient = (block: LibraryBlock) => {
     omittedTransients.current.delete(block.id)
+    transientsRef.current = { ...transientsRef.current, [block.id]: block }
     setTransients((current) => ({ ...current, [block.id]: block }))
   }
 
   const dropTransient = (id: string) => {
     omittedTransients.current.add(id)
+    const { [id]: _omit, ...rest } = transientsRef.current
+    transientsRef.current = rest
     setTransients((current) => {
       if (!current[id]) return current
-      const { [id]: _omit, ...rest } = current
-      return rest
+      const next = { ...current }
+      delete next[id]
+      return next
     })
     setDrafts((current) => {
       if (current[id] == null) return current
@@ -256,8 +273,10 @@ export function LibraryEditor({
     }
     if (isTransientId(current.id)) {
       const next = { ...current, ...patch }
-      if (!isPersistableBlock(next) && def.id === 'text') {
+      if (!isPersistableBlock(next)) {
         putTransient(next)
+        setDrafts((d) => ({ ...d, [current.id]: content }))
+        if (def.id === 'study') setStudyPickFor(current.id)
         setFocusId(current.id)
         return current.id
       }
@@ -283,11 +302,11 @@ export function LibraryEditor({
 
     const emptyDraft = isTransientId(current.id) && !current.content.trim()
     if (mode === 'insert' && !emptyDraft) {
-      const siblings = childrenOf(live(), current.parentBlockId)
-      const index = siblings.findIndex((row) => row.id === current.id) + 1
-      if (def.id === 'text') {
-        const next = makeTransientBlock(pageId, current.parentBlockId, index)
+      const order = spliceIndexAfter(current, live())
+      if (def.id !== 'divider' && def.id !== 'study' && def.id !== 'page') {
+        const next = makeTransientBlock(pageId, current.parentBlockId, order, def.id)
         putTransient(next)
+        setFocusCaret('start')
         setFocusId(next.id)
         return
       }
@@ -296,8 +315,7 @@ export function LibraryEditor({
         parentBlockId: current.parentBlockId,
         type: def.id,
         content: '',
-        order: index,
-        expanded: def.id === 'toggle' ? false : undefined,
+        order,
         targetPageId:
           def.id === 'page'
             ? (await libraryPagesRepo.create({ title: 'Page', parentPageId: pageId })).id
@@ -312,8 +330,39 @@ export function LibraryEditor({
     await applyType(current, def, content)
   }
 
+  const exitListToText = async (block: LibraryBlock) => {
+    if (isTransientId(block.id)) {
+      putTransient({ ...block, type: 'text', content: '' })
+      setFocusCaret('start')
+      setFocusId(block.id)
+      return
+    }
+    const kids = childrenOf(live(), block.id)
+    if (kids.length > 0) {
+      await libraryBlocksRepo.update(block.id, { type: 'text' })
+      setDrafts((d) => ({ ...d, [block.id]: block.content }))
+      setFocusId(block.id)
+      return
+    }
+    const parent = block.parentBlockId
+    const order = block.order
+    await libraryBlocksRepo.remove(block.id)
+    const next = makeTransientBlock(pageId, parent, order, 'text')
+    putTransient(next)
+    setFocusCaret('start')
+    setFocusId(next.id)
+  }
+
   const enter = async (block: LibraryBlock, caret: number) => {
     const { before, after } = splitContent(block.content, caret)
+    const continueType = enterContinuationType(block.type)
+    const kids = childrenOf(live(), block.id)
+
+    if (!before.trim() && !after.trim() && isContinueType(block.type) && kids.length === 0) {
+      await exitListToText(block)
+      return
+    }
+
     if (isTransientId(block.id) && !before.trim() && !after.trim()) return
 
     if (!before.trim() && after.trim()) {
@@ -324,9 +373,10 @@ export function LibraryEditor({
         putTransient({ ...block, content: after })
         return
       }
-      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, liveBlock.order)
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, liveBlock.order, continueType)
       putTransient(next)
       await libraryBlocksRepo.move(liveBlock.id, liveBlock.parentBlockId, liveBlock.order + 1)
+      setFocusCaret('start')
       setFocusId(next.id)
       return
     }
@@ -341,25 +391,25 @@ export function LibraryEditor({
       setDrafts((d) => ({ ...d, [liveBlock.id]: before }))
     }
 
-    const siblings = childrenOf(
-      mergeVisible(await libraryBlocksRepo.forPage(pageId), Object.values(transientsRef.current)),
-      liveBlock.parentBlockId,
-    )
-    const index = siblings.findIndex((row) => row.id === liveBlock.id) + 1
+    const all = mergeVisible(await libraryBlocksRepo.forPage(pageId), Object.values(transientsRef.current))
+    const order = spliceIndexAfter(liveBlock, all)
     if (!after.trim()) {
-      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, index)
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, order, continueType)
       putTransient(next)
+      setFocusCaret('start')
       setFocusId(next.id)
       return
     }
     const created = await libraryBlocksRepo.create({
       pageId,
       parentBlockId: liveBlock.parentBlockId,
-      type: 'text',
+      type: continueType,
       content: after,
-      order: index,
+      order,
+      expanded: continueType === 'toggle' ? false : undefined,
     })
     setDrafts((d) => ({ ...d, [created.id]: after }))
+    setFocusCaret('start')
     setFocusId(created.id)
   }
 
@@ -386,9 +436,7 @@ export function LibraryEditor({
     if (!block.content) {
       await libraryBlocksRepo.remove(block.id)
       if (prev) setFocusId(prev.id)
-      else {
-        setFocusId(transientIdFor(null))
-      }
+      else setFocusId(null)
       return
     }
 
@@ -554,20 +602,48 @@ export function LibraryEditor({
     })
   }
 
+  const onBlurEmpty = (id: string) => {
+    window.setTimeout(() => {
+      if (slashRef.current?.blockId === id) return
+      if (focusIdRef.current === id) return
+      const active = document.activeElement as HTMLElement | null
+      if (active?.closest('.slash-menu, .page-editor-tail, .page-block-plus, .page-block-handle')) return
+      const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/:/g, '\\:')
+      if (active?.closest(`[data-block-id="${safe}"]`)) return
+      const block = transientsRef.current[id]
+      if (!block || block.content.trim()) return
+      const storedNow = storedRef.current ?? []
+      if (!block.parentBlockId && childrenOf(storedNow, null).length === 0) return
+      if (block.parentBlockId) {
+        const parent = storedNow.find((row) => row.id === block.parentBlockId)
+        const kids = childrenOf(storedNow, block.parentBlockId)
+        if (parent?.type === 'toggle' && parent.expanded && kids.length === 0) return
+      }
+      dropTransient(id)
+      setFocusId((current) => (current === id ? null : current))
+    }, 0)
+  }
+
   const activateTail = () => {
     const roots = childrenOf(blocks, null)
     const last = roots[roots.length - 1]
     const rootDraft = transientIdFor(null)
     if (last?.id === rootDraft) {
+      if (!last.content.trim() && last.type !== 'text') {
+        putTransient({ ...last, type: 'text' })
+      }
+      setFocusCaret('start')
       setFocusId(rootDraft)
       return
     }
     if (last && last.type === 'text' && !last.content.trim()) {
+      setFocusCaret('start')
       setFocusId(last.id)
       return
     }
-    const next = makeTransientBlock(pageId, null, roots.length)
+    const next = makeTransientBlock(pageId, null, last ? last.order + 1 : 0)
     putTransient(next)
+    setFocusCaret('start')
     setFocusId(next.id)
   }
 
@@ -590,11 +666,13 @@ export function LibraryEditor({
               blocks={blocks}
               depth={depth}
               focused={focusId === block.id}
+              focusCaret={focusId === block.id ? focusCaret : 'end'}
               gutterOn={hoveredId === block.id || (focusId === block.id && hoveredId === null)}
               onHover={setHoveredId}
               onFocus={focus}
               onChange={onChange}
               onKeyDown={onKeyDown}
+              onBlurEmpty={onBlurEmpty}
               onToggle={onToggle}
               onOpenStudy={(nodeId) => void openStudySession(nodeId)}
               onOpenPage={(id) => onOpenPage?.(id)}
@@ -659,7 +737,13 @@ export function LibraryEditor({
 
       <div className="page-editor-body">
         {renderBranch(null, 0)}
-        <button type="button" className="page-editor-tail" aria-label="Add text block" onClick={activateTail} />
+        <button
+          type="button"
+          className="page-editor-tail"
+          data-testid="page-editor-tail"
+          aria-label="Add text block"
+          onClick={activateTail}
+        />
       </div>
 
       {slash && (

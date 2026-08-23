@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { LibraryBlock } from '@/types'
 import {
+  enterContinuationType,
   filterLibraryBlocks,
   indentPlacement,
   isPersistableBlock,
   LIBRARY_BLOCK_CATALOGUE,
   makeTransientBlock,
   nextTransients,
+  spliceIndexAfter,
   outdentPlacement,
   slashQueryFrom,
   splitContent,
@@ -57,7 +59,8 @@ describe('library page model', () => {
     expect(isPersistableBlock(block({ id: 'a', content: '   ' }))).toBe(false)
     expect(isPersistableBlock(block({ id: 'a', content: '/heading 1' }))).toBe(false)
     expect(isPersistableBlock(block({ id: 'a', content: 'Introduction' }))).toBe(true)
-    expect(isPersistableBlock(block({ id: 'a', type: 'toggle', content: '' }))).toBe(true)
+    expect(isPersistableBlock(block({ id: 'a', type: 'toggle', content: '' }))).toBe(false)
+    expect(isPersistableBlock(block({ id: 'a', type: 'toggle', content: 'Aqidah' }))).toBe(true)
     expect(isPersistableBlock(block({ id: 'a', type: 'divider', content: '' }))).toBe(true)
   })
 
@@ -86,12 +89,12 @@ describe('library page model', () => {
     expect(indentPlacement(only, [only])).toBeNull()
   })
 
-  it('gives an expanded empty toggle a nested draft without touching stored rows', () => {
+  it('gives an expanded empty toggle a nested draft without a trailing root draft', () => {
     const toggle = block({ id: 't1', type: 'toggle', content: 'Book', expanded: true })
     const next = nextTransients('p', [toggle], {})
     expect(next[transientIdFor('t1')]?.parentBlockId).toBe('t1')
     expect(next[transientIdFor('t1')]?.type).toBe('text')
-    expect(next[transientIdFor(null)]).toBeTruthy()
+    expect(next[transientIdFor(null)]).toBeUndefined()
   })
 
   it('drops a nested draft when the toggle collapses', () => {
@@ -109,11 +112,49 @@ describe('library page model', () => {
     expect(next[leftover.id]).toBeUndefined()
   })
 
-  it('keeps the root draft after every stored root so it cannot sit between rows', () => {
+  it('does not append a root draft when the page already has blocks', () => {
     const first = block({ id: 'a', content: 'Alpha', order: 0 })
     const second = block({ id: 'b', content: 'Beta', order: 1 })
-    const stale = makeTransientBlock('p', null, 0)
-    const next = nextTransients('p', [first, second], { [stale.id]: stale })
-    expect(next[transientIdFor(null)]?.order).toBe(2)
+    const next = nextTransients('p', [first, second], {})
+    expect(next[transientIdFor(null)]).toBeUndefined()
+  })
+
+  it('keeps a user-created root draft in the position Enter assigned', () => {
+    const first = block({ id: 'a', content: 'Alpha', order: 0 })
+    const draft = makeTransientBlock('p', null, 0.5, 'toggle')
+    const next = nextTransients('p', [first], { [draft.id]: draft }, new Set(), draft.id)
+    expect(next[transientIdFor(null)]?.order).toBe(0.5)
+    expect(next[transientIdFor(null)]?.type).toBe('toggle')
+  })
+
+  it('drops an unfocused leftover root draft once stored blocks exist', () => {
+    const first = block({ id: 'a', content: 'Alpha', order: 0 })
+    const leftover = makeTransientBlock('p', null, 0, 'text', true)
+    const next = nextTransients('p', [first], { [leftover.id]: leftover }, new Set(), null)
+    expect(next[transientIdFor(null)]).toBeUndefined()
+  })
+
+  it('seeds one ephemeral line only on an empty page', () => {
+    const next = nextTransients('p', [], {})
+    expect(next[transientIdFor(null)]?.type).toBe('text')
+    expect(next[transientIdFor(null)]?.content).toBe('')
+  })
+
+  it('continues lists as the same type and headings as text', () => {
+    expect(enterContinuationType('toggle')).toBe('toggle')
+    expect(enterContinuationType('bullet')).toBe('bullet')
+    expect(enterContinuationType('numbered')).toBe('numbered')
+    expect(enterContinuationType('todo')).toBe('todo')
+    expect(enterContinuationType('quote')).toBe('quote')
+    expect(enterContinuationType('text')).toBe('text')
+    expect(enterContinuationType('heading1')).toBe('text')
+    expect(enterContinuationType('heading2')).toBe('text')
+  })
+
+  it('orders a new sibling immediately after the current block', () => {
+    const a = block({ id: 'a', content: 'Aqidah', type: 'toggle', order: 0 })
+    const b = block({ id: 'b', content: 'Later', type: 'toggle', order: 1 })
+    expect(spliceIndexAfter(a, [a, b])).toBe(1)
+    expect(spliceIndexAfter(b, [a, b])).toBe(2)
   })
 })

@@ -14,11 +14,13 @@ export function LibraryBlockRow({
   blocks,
   depth,
   focused,
+  focusCaret,
   gutterOn,
   onHover,
   onFocus,
   onChange,
   onKeyDown,
+  onBlurEmpty,
   onToggle,
   onOpenStudy,
   onOpenPage,
@@ -35,11 +37,13 @@ export function LibraryBlockRow({
   blocks: LibraryBlock[]
   depth: number
   focused: boolean
+  focusCaret: 'start' | 'end'
   gutterOn: boolean
   onHover: (id: string | null) => void
   onFocus: (id: string) => void
   onChange: (id: string, content: string, caret: number) => void
   onKeyDown: (id: string, event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onBlurEmpty: (id: string) => void
   onToggle: (id: string) => void
   onOpenStudy: (nodeId: string) => void
   onOpenPage: (pageId: string) => void
@@ -73,11 +77,11 @@ export function LibraryBlockRow({
       if (!target) return
       if (document.activeElement === target) return
       target.focus()
-      const caret = target.value.length
-      target.setSelectionRange(caret, caret)
+      const pos = focusCaret === 'start' ? 0 : target.value.length
+      target.setSelectionRange(pos, pos)
     })
     return () => cancelAnimationFrame(frame)
-  }, [focused, block.id])
+  }, [focused, block.id, focusCaret])
 
   const isToggle = block.type === 'toggle'
   const isTransient = isTransientId(block.id)
@@ -113,13 +117,14 @@ export function LibraryBlockRow({
         onDrop(block.id)
       }}
     >
-      <div className="page-block-gutter">
+      <div className="page-block-gutter" data-testid="block-gutter">
         <button
           type="button"
           className="page-block-plus"
           aria-label="Insert block"
           title="Insert a block"
           tabIndex={gutterOn ? 0 : -1}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={(event) => {
             event.preventDefault()
             event.stopPropagation()
@@ -146,7 +151,7 @@ export function LibraryBlockRow({
         </button>
       </div>
 
-      <div className="page-block-marker">
+      <div className="page-block-marker" data-testid="block-marker">
         {isToggle && (
           <button
             type="button"
@@ -190,7 +195,7 @@ export function LibraryBlockRow({
       ) : block.type === 'study' ? (
         <button
           type="button"
-          className="page-block-study"
+          className="page-block-study-link"
           onClick={() => block.libraryNodeId && onOpenStudy(block.libraryNodeId)}
         >
           <span className="page-block-study-title">{block.content || 'Study page'}</span>
@@ -198,7 +203,7 @@ export function LibraryBlockRow({
       ) : block.type === 'page' ? (
         <button
           type="button"
-          className="page-block-page"
+          className="page-block-page-link"
           onClick={() => block.targetPageId && onOpenPage(block.targetPageId)}
         >
           <span className="page-block-page-title">{block.content || 'Page'}</span>
@@ -214,6 +219,7 @@ export function LibraryBlockRow({
           spellCheck={false}
           onFocus={() => onFocus(block.id)}
           onClick={() => onFocus(block.id)}
+          onBlur={() => onBlurEmpty(block.id)}
           onChange={(event) =>
             onChange(
               block.id,

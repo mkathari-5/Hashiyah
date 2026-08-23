@@ -1564,10 +1564,13 @@ svg.block-menu-icon {
   --page-gutter: 2.75rem;
   --page-marker: 1.4rem;
   --page-indent: 1.5rem;
+  box-sizing: border-box;
   max-width: 52rem;
+  width: 100%;
   margin-inline: auto;
   padding: 3.75rem 3.5rem 8rem;
   min-height: 100%;
+  overflow-x: hidden;
 }
 .page-editor-loading {
   font-size: 13px;
@@ -1613,11 +1616,15 @@ svg.block-menu-icon {
 }
 .page-editor-body {
   min-height: 40vh;
+  width: 100%;
+  max-width: 100%;
 }
 .page-block-list {
   margin: 0;
   padding: 0;
   list-style: none;
+  width: 100%;
+  max-width: 100%;
 }
 .page-block-list .page-block-list {
   margin: 0;
@@ -1625,14 +1632,23 @@ svg.block-menu-icon {
 }
 
 .page-block {
+  box-sizing: border-box;
   position: relative;
-  display: flex;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: var(--page-gutter) var(--page-marker) minmax(0, 1fr);
+  align-items: start;
+  width: 100%;
+  max-width: 100%;
   min-height: 1.85rem;
   margin: 1px 0;
-  padding: 0.1rem 0.2rem 0.1rem 0;
-  padding-inline-start: calc(var(--page-gutter) + var(--indent, 0rem));
+  padding: 0.1rem 0;
+  padding-inline-start: var(--indent, 0rem);
+  border-radius: 4px;
   cursor: text;
+}
+.page-block > * {
+  box-sizing: border-box;
+  min-width: 0;
 }
 .page-block-study,
 .page-block-page,
@@ -1645,17 +1661,19 @@ svg.block-menu-icon {
 .page-block.is-dragging {
   opacity: 0.45;
 }
+.page-block:hover,
+.page-block.is-gutter-on {
+  background: var(--color-hover);
+}
 
 .page-block-gutter {
-  position: absolute;
-  inset-inline-start: var(--indent, 0rem);
-  top: 0.15rem;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0.05rem;
   width: var(--page-gutter);
   height: 1.55rem;
+  margin-top: 0.15rem;
   opacity: 0;
   pointer-events: none;
 }
@@ -1735,23 +1753,24 @@ svg.block-menu-icon {
   border: none;
   border-top: 1px solid var(--color-line-strong);
 }
-.page-block-study,
-.page-block-page {
+.page-block-study-link,
+.page-block-page-link {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
   width: 100%;
-  min-height: 2rem;
-  margin: 0.1rem 0;
-  padding: 0.35rem 0.45rem;
-  border-radius: 6px;
+  max-width: 100%;
+  min-height: 1.7rem;
+  margin: 0;
+  padding: 0.18rem 0.1rem;
+  border-radius: 4px;
   color: var(--color-ink);
   text-align: start;
+  background: transparent;
   cursor: pointer;
 }
-.page-block-page:hover,
-.page-block-study:hover {
-  background: var(--color-hover);
+.page-block-page-link:hover,
+.page-block-study-link:hover {
+  background: transparent;
 }
 .page-block-study-title,
 .page-block-page-title {

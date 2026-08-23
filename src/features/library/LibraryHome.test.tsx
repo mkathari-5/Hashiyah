@@ -39,6 +39,7 @@ describe('LibraryHome', () => {
     expect(archive).toHaveAttribute('data-block-type', 'page')
     expect(archive?.querySelector('.page-block-caret')).toBeNull()
     expect(screen.queryByLabelText('Expand')).toBeNull()
+    expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
     expect(document.querySelector('.lib-tree')).toBeNull()
     expect(screen.queryByText('Your library is empty.')).toBeNull()
 

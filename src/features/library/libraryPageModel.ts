@@ -81,8 +81,7 @@ export function stripSlashQuery(content: string): string {
 
 export function isPersistableBlock(block: Pick<LibraryBlock, 'type' | 'content' | 'libraryNodeId' | 'targetPageId'>): boolean {
   if (block.type === 'divider' || block.type === 'study' || block.type === 'page') return true
-  if (block.type === 'text' && slashQueryFrom(block.content) !== null) return false
-  if (block.type !== 'text') return true
+  if (slashQueryFrom(block.content) !== null) return false
   return block.content.trim().length > 0
 }
 
@@ -93,7 +92,12 @@ export function displayTitleOf(block: Pick<LibraryBlock, 'content' | 'type'>): s
 export function childrenOf(blocks: LibraryBlock[], parentId: string | null): LibraryBlock[] {
   return blocks
     .filter((block) => block.parentBlockId === parentId)
-    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+    .sort(
+      (a, b) =>
+        a.order - b.order ||
+        Number(isTransientId(a.id)) - Number(isTransientId(b.id)) ||
+        a.id.localeCompare(b.id),
+    )
 }
 
 export function blockById(blocks: LibraryBlock[], id: string): LibraryBlock | undefined {
@@ -173,18 +177,41 @@ export function splitContent(content: string, cursor: number): { before: string;
   return { before: content.slice(0, at), after: content.slice(at) }
 }
 
-export function makeTransientBlock(pageId: string, parentBlockId: string | null, order: number): LibraryBlock {
+export function makeTransientBlock(
+  pageId: string,
+  parentBlockId: string | null,
+  order: number,
+  type: LibraryBlockType = 'text',
+  seeded = false,
+): LibraryBlock {
   return {
     id: transientIdFor(parentBlockId),
     pageId,
     parentBlockId,
-    type: 'text',
+    type,
     content: '',
     order,
     expanded: false,
-    createdAt: 0,
+    createdAt: seeded ? 0 : 1,
     updatedAt: 0,
   }
+}
+
+/** Types that Enter continues as another item of the same type. */
+export function isContinueType(type: LibraryBlockType): boolean {
+  return type === 'toggle' || type === 'bullet' || type === 'numbered' || type === 'todo' || type === 'quote'
+}
+
+/** Headings (and everything else) become a text sibling. */
+export function enterContinuationType(type: LibraryBlockType): LibraryBlockType {
+  return isContinueType(type) ? type : 'text'
+}
+
+/** 0-based splice index immediately after `block` among its siblings. */
+export function spliceIndexAfter(block: LibraryBlock, blocks: LibraryBlock[]): number {
+  const siblings = childrenOf(blocks, block.parentBlockId)
+  const index = siblings.findIndex((row) => row.id === block.id)
+  return index < 0 ? siblings.length : index + 1
 }
 
 export function mergeVisible(blocks: LibraryBlock[], transients: LibraryBlock[]): LibraryBlock[] {
@@ -194,14 +221,16 @@ export function mergeVisible(blocks: LibraryBlock[], transients: LibraryBlock[])
 }
 
 /**
- * Keep live drafts, drop drafts whose parent collapsed or vanished, and ensure
- * an empty expanded toggle always has a nested ephemeral child.
+ * Keep live drafts the user actually created. Do not append a trailing root
+ * draft merely because the page has blocks. An empty page still gets one
+ * ephemeral line, and an empty expanded toggle still gets a nested editor.
  */
 export function nextTransients(
   pageId: string,
   stored: LibraryBlock[],
   current: Record<string, LibraryBlock>,
   omitted: ReadonlySet<string> = new Set(),
+  focusedId: string | null = null,
 ): Record<string, LibraryBlock> {
   const storedIds = new Set(stored.map((block) => block.id))
   const next: Record<string, LibraryBlock> = {}
@@ -219,11 +248,13 @@ export function nextTransients(
   }
 
   const rootId = transientIdFor(null)
-  const rootOrder = childrenOf(stored, null).length
-  if (!next[rootId]) {
-    next[rootId] = makeTransientBlock(pageId, null, rootOrder)
-  } else {
-    next[rootId] = { ...next[rootId], order: rootOrder }
+  const storedRoots = childrenOf(stored, null)
+  if (storedRoots.length === 0) {
+    if (!next[rootId] && !omitted.has(rootId)) {
+      next[rootId] = makeTransientBlock(pageId, null, 0, 'text', true)
+    }
+  } else if (next[rootId] && !next[rootId].content.trim() && focusedId !== rootId) {
+    delete next[rootId]
   }
 
   for (const toggle of stored) {
@@ -231,7 +262,7 @@ export function nextTransients(
     if (childrenOf(stored, toggle.id).length > 0) continue
     const id = transientIdFor(toggle.id)
     if (omitted.has(id)) continue
-    if (!next[id]) next[id] = makeTransientBlock(pageId, toggle.id, 0)
+    if (!next[id]) next[id] = makeTransientBlock(pageId, toggle.id, 0, 'text', true)
   }
 
   return next
@@ -283,7 +314,7 @@ export function placeholderFor(type: LibraryBlockType, opts?: { focused?: boolea
   if (type === 'todo') return active ? 'To-do' : ''
   if (type === 'bullet' || type === 'numbered') return active ? 'List' : ''
   if (type === 'page') return active ? 'Page' : ''
-  return "Type '/' for commands"
+  return active ? "Type '/' for commands" : ''
 }
 
 export function ariaLabelFor(type: LibraryBlockType): string {
