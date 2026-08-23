@@ -1559,6 +1559,247 @@ svg.block-menu-icon {
   padding: 2.75rem 2rem 6rem;
 }
 
+/* ── Page editor (Library Home) ─────────────────────────────────────────── */
+.page-editor {
+  max-width: 48rem;
+  margin-inline: auto;
+  padding: 4.5rem 5.5rem 8rem;
+  min-height: 100%;
+}
+.page-editor-loading {
+  font-size: 13px;
+  color: var(--color-ink-faint);
+}
+.page-title {
+  display: block;
+  width: 100%;
+  margin: 0 0 1.75rem;
+  padding: 0.15rem 0.15rem 0.35rem;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--color-ink);
+  outline: none;
+}
+.page-title::placeholder {
+  color: var(--color-ink-faint);
+  font-weight: 650;
+}
+.page-editor-body {
+  min-height: 50vh;
+}
+.page-block-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.page-block-list .page-block-list {
+  margin: 0;
+}
+
+.page-block {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.15rem;
+  min-height: 1.85rem;
+  margin: 1px 0;
+  padding: 0.12rem 0.2rem 0.12rem 0;
+  padding-inline-start: calc(2.5rem + var(--indent, 0rem));
+}
+.page-block.is-drop {
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+.page-block.is-dragging {
+  opacity: 0.45;
+}
+
+.page-block-gutter {
+  position: absolute;
+  inset-inline-start: var(--indent, 0rem);
+  top: 0.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.05rem;
+  opacity: 0;
+  pointer-events: none;
+}
+.page-block:hover .page-block-gutter,
+.page-block.is-focused .page-block-gutter,
+.page-block:focus-within .page-block-gutter {
+  opacity: 1;
+  pointer-events: auto;
+}
+.page-block-plus,
+.page-block-handle {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 4px;
+  color: var(--color-ink-faint);
+}
+.page-block-plus:hover,
+.page-block-handle:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+.page-block-handle {
+  cursor: grab;
+}
+.page-block-handle:active {
+  cursor: grabbing;
+}
+
+.page-block-caret {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.7rem;
+  margin-top: 0.05rem;
+  color: var(--color-ink-faint);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.page-block-caret:hover {
+  background: var(--color-hover);
+  color: var(--color-ink);
+}
+
+.page-block-bullet,
+.page-block-number {
+  flex-shrink: 0;
+  width: 1.35rem;
+  padding-top: 0.28rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+.page-block-check {
+  margin: 0.42rem 0.35rem 0 0.15rem;
+  accent-color: var(--color-accent);
+}
+.page-block-rule {
+  flex: 1;
+  margin: 0.85rem 0;
+  border: none;
+  border-top: 1px solid var(--color-line-strong);
+}
+.page-block-study {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  margin: 0.15rem 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-panel);
+  color: var(--color-ink);
+  text-align: start;
+}
+.page-block-study:hover {
+  border-color: var(--color-line-strong);
+  background: var(--color-hover);
+}
+.page-block-study-title {
+  font-size: 14.5px;
+  font-weight: 550;
+}
+
+.page-block-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0.2rem 0.15rem;
+  border: none;
+  background: transparent;
+  resize: none;
+  overflow: hidden;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-ink);
+  outline: none;
+}
+.page-block-input::placeholder {
+  color: var(--color-ink-faint);
+}
+.page-block-input-heading1 {
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  padding-top: 0.45rem;
+  padding-bottom: 0.15rem;
+}
+.page-block-input-heading2 {
+  font-size: 1.4rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  padding-top: 0.3rem;
+}
+.page-block-input-heading3 {
+  font-size: 1.15rem;
+  font-weight: 650;
+  line-height: 1.35;
+  padding-top: 0.2rem;
+}
+.page-block-input-quote {
+  margin-inline-start: 0.15rem;
+  padding-inline-start: 0.85rem;
+  border-inline-start: 3px solid var(--color-line-strong);
+  color: var(--color-ink-muted);
+  font-style: italic;
+}
+.page-block-toggle .page-block-input {
+  font-weight: 550;
+}
+
+.page-editor-tail {
+  display: block;
+  width: 100%;
+  min-height: 12rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: text;
+}
+
+.page-slash-menu {
+  position: fixed;
+  z-index: 60;
+}
+.page-study-pick .page-slash-menu {
+  position: fixed;
+  top: 30vh;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+}
+
+@media (max-width: 1100px) {
+  .page-editor {
+    padding: 2.5rem 3.25rem 5rem;
+  }
+}
+@media (max-width: 860px) {
+  .page-editor {
+    padding: 1.75rem 2.5rem 4rem;
+  }
+  .page-title {
+    font-size: 2rem;
+  }
+}
+
 .library-masthead {
   display: flex;
   align-items: flex-end;

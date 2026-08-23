@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppShell } from '@/features/shell/AppShell'
 import { bootstrapLibrary } from '@/services/library/bootstrap'
+import { migrateLibraryPages } from '@/features/library/migrateLibraryPages'
 import { preloadQuran } from '@/services/quran/QuranIndex'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import { useAppStore } from '@/state/useAppStore'
@@ -18,6 +19,7 @@ export function App() {
         // here leaves the tree incomplete rather than the database broken, and
         // the next start finishes the job.
         await bootstrapLibrary()
+        await migrateLibraryPages()
         await useLibraryStore.getState().hydrate()
         preloadQuran()
       } catch (error) {

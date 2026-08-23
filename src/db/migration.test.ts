@@ -257,6 +257,8 @@ describe('schema v1 → current', () => {
     // never by the schema upgrade itself, so a failure there cannot leave the
     // database half-migrated.
     expect(await db.libraryNodes.count()).toBe(0)
+    expect(await db.libraryPages.count()).toBe(0)
+    expect(await db.libraryBlocks.count()).toBe(0)
 
     db.close()
   })

@@ -647,16 +647,13 @@ export function LibraryTree({
                   e.stopPropagation()
                   const collapsing = expanded
                   void toggleExpanded(node.id, expanded)
-                  if (collapsing) {
-                    if (
-                      sessionRef.current?.kind === 'draft' &&
-                      sessionRef.current.parentId === node.id &&
-                      !sessionRef.current.text.trim()
-                    ) {
-                      clearSession()
-                    }
-                  } else if (nestable && children.length === 0) {
-                    void beginDraft(node, null)
+                  if (
+                    collapsing &&
+                    sessionRef.current?.kind === 'draft' &&
+                    sessionRef.current.parentId === node.id &&
+                    !sessionRef.current.text.trim()
+                  ) {
+                    clearSession()
                   }
                 }}
               >
@@ -670,12 +667,6 @@ export function LibraryTree({
               type="button"
               className="lib-label"
               onClick={() => {
-                // Empty nestable node: write in the tree. Study is a click on
-                // an item that already has children (or notes, via openNode).
-                if (nestable && children.length === 0 && !node.noteId) {
-                  void beginDraft(node, null)
-                  return
-                }
                 void openNode(node.id)
               }}
               onDoubleClick={(e) => {
@@ -687,14 +678,7 @@ export function LibraryTree({
                 if (e.key !== 'Enter' || e.shiftKey) return
                 e.preventDefault()
                 e.stopPropagation()
-                if (node.parentId) {
-                  const parent = byId.get(node.parentId)
-                  if (parent && canContainChildren(parent.type)) {
-                    void beginDraft(parent, node.id)
-                    return
-                  }
-                }
-                if (nestable) void startWritingUnder(node)
+                void openNode(node.id)
               }}
               title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Empty title'}
             >

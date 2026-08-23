@@ -10,7 +10,9 @@ import type {
   DocumentBlob,
   DocumentMeta,
   Lesson,
+  LibraryBlock,
   LibraryNode,
+  LibraryPage,
   Note,
   NoteDoc,
   NoteLink,
@@ -53,6 +55,8 @@ export class HashiyahDB extends Dexie {
   noteLinks!: Table<NoteLink, string>
   assets!: Table<Asset, string>
   libraryNodes!: Table<LibraryNode, string>
+  libraryPages!: Table<LibraryPage, string>
+  libraryBlocks!: Table<LibraryBlock, string>
 
   constructor(name = 'hashiyah') {
     super(name)
@@ -108,6 +112,21 @@ export class HashiyahDB extends Dexie {
      */
     this.version(3).stores({
       libraryNodes: 'id, parentId, type, order, bookId, noteId, favorite, lastOpenedAt',
+    })
+
+    /**
+     * v4 — additive only. Introduces Library *pages* (a Notion-style block
+     * editor) beside the existing study tree.
+     *
+     * `libraryNodes` is left untouched: notes, PDFs, books and the Study
+     * sidebar continue to read it. Page blocks may *reference* a node via
+     * `libraryNodeId`; they never copy or delete it. Filling pages is a
+     * separate, idempotent migration (see `migrateLibraryPages.ts`), not an
+     * upgrade callback.
+     */
+    this.version(4).stores({
+      libraryPages: 'id, parentPageId, updatedAt',
+      libraryBlocks: 'id, pageId, parentBlockId, [pageId+parentBlockId], libraryNodeId, order',
     })
   }
 }

@@ -96,6 +96,53 @@ export interface LibraryNode {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Library pages (block editor)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Visual block type on a Library page. Independent of LibraryNodeType — a
+ * heading is a heading because the user chose it, not because it sits under
+ * a book in the study tree.
+ */
+export type LibraryBlockType =
+  | 'text'
+  | 'toggle'
+  | 'heading1'
+  | 'heading2'
+  | 'heading3'
+  | 'bullet'
+  | 'numbered'
+  | 'todo'
+  | 'quote'
+  | 'divider'
+  | 'study'
+
+export interface LibraryPage {
+  id: string
+  title: string
+  parentPageId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface LibraryBlock {
+  id: string
+  pageId: string
+  /** null = a top-level block on the page. */
+  parentBlockId: string | null
+  type: LibraryBlockType
+  content: string
+  order: number
+  /** Toggle open/closed. Ignored for every other type. */
+  expanded: boolean
+  checked?: boolean
+  /** When set, this block opens that LibraryNode in Study. */
+  libraryNodeId?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Documents & pages
 // ─────────────────────────────────────────────────────────────────────────────
 

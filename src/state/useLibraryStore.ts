@@ -21,6 +21,8 @@ interface LibraryState {
 
   hydrate: () => Promise<void>
   openNode: (nodeId: string) => Promise<void>
+  /** Always enter Study — used by Study-page blocks, including sciences. */
+  openStudySession: (nodeId: string) => Promise<void>
   showLibrary: () => void
   toggleExpanded: (nodeId: string, collapsed: boolean) => Promise<void>
 }
@@ -79,12 +81,21 @@ export const useLibraryStore = create<LibraryState>((set) => ({
     const node = await libraryRepo.get(nodeId)
     if (!node) return
 
-    // A science or folder is a container, not a destination.
+    // In the Study sidebar a science or folder is a container, not a destination.
     if (node.type === 'science' || node.type === 'folder') {
       await libraryRepo.update(nodeId, { collapsed: !node.collapsed })
       return
     }
 
+    await reopen(nodeId)
+    await libraryRepo.touch(nodeId)
+    set({ activeNodeId: nodeId })
+    void appStateRepo.set('activeLibraryNode', nodeId)
+  },
+
+  async openStudySession(nodeId) {
+    const node = await libraryRepo.get(nodeId)
+    if (!node) return
     await reopen(nodeId)
     await libraryRepo.touch(nodeId)
     set({ activeNodeId: nodeId })

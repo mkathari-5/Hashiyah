@@ -4,30 +4,25 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { db } from '@/db/db'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryHome } from '@/features/library/LibraryHome'
-
-/**
- * §F.1 — after the library has resolved, "empty" and "being prepared" must
- * never appear together. Home owns the empty copy; the tree stays silent.
- */
+import { PREVIOUS_LIBRARY_TITLE } from '@/features/library/libraryPageModel'
 
 beforeEach(async () => {
   await Dexie.waitFor(db.open())
   await Promise.all(db.tables.map((t) => t.clear()))
 })
 
-describe('LibraryHome empty state', () => {
-  it('shows only the empty-library copy once loading has finished', async () => {
+describe('LibraryHome', () => {
+  it('renders a page editor rather than LibraryTree', async () => {
     render(<LibraryHome onImport={() => undefined} />)
 
-    await waitFor(() => {
-      expect(screen.getByText('Your library is empty.')).toBeInTheDocument()
-    })
-
-    expect(screen.queryByText('Your library is being prepared…')).toBeNull()
-    expect(screen.getByText('Import a PDF', { selector: '.empty-state-action' })).toBeInTheDocument()
+    expect(await screen.findByLabelText('Page title')).toHaveValue('Library')
+    expect(await screen.findByLabelText('Text')).toBeInTheDocument()
+    expect(document.querySelector('.lib-tree')).toBeNull()
+    expect(screen.queryByText('Your library is empty.')).toBeNull()
+    expect(screen.queryByText(/Add under/i)).toBeNull()
   })
 
-  it('does not show the empty copy when the library has roots', async () => {
+  it('imports existing study titles under Previous Library instead of outlining them', async () => {
     await libraryRepo.create({
       parentId: null,
       type: 'science',
@@ -38,10 +33,9 @@ describe('LibraryHome empty state', () => {
     render(<LibraryHome onImport={() => undefined} />)
 
     await waitFor(() => {
-      expect(screen.getByText('Aqīdah')).toBeInTheDocument()
+      expect(screen.getByDisplayValue(PREVIOUS_LIBRARY_TITLE)).toBeInTheDocument()
     })
-
+    expect(document.querySelector('.lib-tree')).toBeNull()
     expect(screen.queryByText('Your library is empty.')).toBeNull()
-    expect(screen.queryByText('Your library is being prepared…')).toBeNull()
   })
 })

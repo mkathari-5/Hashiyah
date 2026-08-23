@@ -15,6 +15,8 @@ export const ids = {
   layer: () => newId('lyr'),
   bookmark: () => newId('bm'),
   lesson: () => newId('les'),
+  libraryPage: () => newId('lpage'),
+  libraryBlock: () => newId('lblk'),
 }
 
 export const pageId = (documentId: string, pageNumber: number) => `${documentId}:${pageNumber}`

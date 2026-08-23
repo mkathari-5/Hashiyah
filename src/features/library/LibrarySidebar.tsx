@@ -13,8 +13,8 @@ import type { LibraryNode } from '@/types'
 /**
  * The compact library while studying (§E4).
  *
- * The same tree as the home page, denser, with a way back to the library. It
- * reads the same data through the same component — there is no second library.
+ * Navigation for opening existing study material. The Library home page is a
+ * separate block editor — this sidebar is not that editor.
  */
 export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   const showLibrary = useLibraryStore((s) => s.showLibrary)
