@@ -143,6 +143,17 @@ export function LibraryTree({
     return map
   }, [nodes])
 
+  const ancestorIds = useMemo(() => {
+    const set = new Set<string>()
+    if (!activeNodeId) return set
+    let current = byId.get(activeNodeId)
+    while (current?.parentId) {
+      set.add(current.parentId)
+      current = byId.get(current.parentId)
+    }
+    return set
+  }, [activeNodeId, byId])
+
   const beginRename = useCallback((node: LibraryNode, arabic = false) => {
     const next: RenameSession = {
       kind: 'rename',
@@ -512,10 +523,10 @@ export function LibraryTree({
     <div
       className={`lib-row is-editing lib-row-${opts.rowType}${opts.draft ? ' is-draft' : ''}`}
       data-lib-row={opts.draft ? 'draft' : 'rename'}
-      style={{ paddingInlineStart: `${opts.depth * 0.85 + 0.35}rem` }}
+      style={{ paddingInlineStart: `${opts.depth * 1.125 + 0.25}rem` }}
     >
       <span className="lib-caret" aria-hidden>
-        <Icon name="chevron-right" className={`h-3 w-3 ${opts.expanded ? 'rotate-90' : ''}`} />
+        <Icon name="chevron-right" className={`lib-caret-icon${opts.expanded ? ' is-expanded' : ''}`} />
       </span>
       <span className="lib-label">
         <input
@@ -596,7 +607,7 @@ export function LibraryTree({
     const showChildren = expanded || (session?.kind === 'draft' && session.parentId === node.id)
 
     return (
-      <li key={node.id}>
+      <li key={node.id} role="none">
         {renaming ? (
           renderEditor({
             depth,
@@ -608,8 +619,11 @@ export function LibraryTree({
           })
         ) : (
           <div
-            className={`lib-row ${selected ? 'is-selected' : ''} ${dropTarget === node.id ? 'is-drop' : ''} lib-row-${node.type}`}
-            style={{ paddingInlineStart: `${depth * 0.85 + 0.35}rem` }}
+            className={`lib-row ${selected ? 'is-selected' : ''} ${ancestorIds.has(node.id) ? 'is-ancestor' : ''} ${dropTarget === node.id ? 'is-drop' : ''} lib-row-${node.type}`}
+            role="treeitem"
+            aria-selected={selected}
+            aria-expanded={nestable || children.length > 0 ? expanded : undefined}
+            style={{ paddingInlineStart: `${depth * 1.125 + 0.25}rem` }}
             draggable
             onDragStart={(e) => {
               e.stopPropagation()
@@ -657,7 +671,7 @@ export function LibraryTree({
                   }
                 }}
               >
-                <Icon name="chevron-right" className={`h-3 w-3 ${expanded ? 'rotate-90' : ''}`} />
+                <Icon name="chevron-right" className={`lib-caret-icon${expanded ? ' is-expanded' : ''}`} />
               </button>
             ) : (
               <span className="lib-caret" aria-hidden />
@@ -682,7 +696,10 @@ export function LibraryTree({
               }}
               title={[node.title, node.arabicTitle].filter(Boolean).join(' — ') || 'Empty title'}
             >
-              {node.type === 'book' && <Icon name={ICONS.book} className="lib-icon" />}
+              {(node.type === 'book' ||
+                node.type === 'science' ||
+                node.type === 'folder' ||
+                node.type === 'course') && <Icon name={ICONS[node.type]} className="lib-icon" />}
               <NodeTitle node={node} />
               {node.favorite && <Icon name="star" className="lib-star" />}
             </button>
@@ -704,7 +721,7 @@ export function LibraryTree({
                   } as React.MouseEvent)
                 }}
               >
-                ⋯
+                <Icon name="dots" className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -721,7 +738,7 @@ export function LibraryTree({
         )}
 
         {showChildren && (
-          <ul>
+          <ul role="group">
             {children.map((child) => (
               <Fragment key={child.id}>
                 {renderNode(child, depth + 1)}
@@ -753,7 +770,9 @@ export function LibraryTree({
   if (roots.length === 0) return null
 
   return (
-    <ul className={`lib-tree lib-tree-${variant}`}>{roots.map((node) => renderNode(node, 0))}</ul>
+    <ul className={`lib-tree lib-tree-${variant}`} role="tree">
+      {roots.map((node) => renderNode(node, 0))}
+    </ul>
   )
 }
 

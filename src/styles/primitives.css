@@ -1,0 +1,175 @@
+/* Shared interactive primitives — buttons, fields, overlays, motion. */
+
+.ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  height: 1.75rem;
+  padding: 0 0.65rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.ui-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.ui-btn:active:not(:disabled) {
+  background: var(--surface-selected);
+}
+
+.ui-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.ui-btn.is-selected,
+.ui-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ui-btn-icon {
+  width: 1.75rem;
+  padding: 0;
+  color: var(--text-muted);
+}
+
+.ui-btn-ghost {
+  color: var(--text-muted);
+}
+
+.ui-btn-secondary {
+  border-color: var(--border-subtle);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.ui-btn-secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.ui-btn-primary {
+  background: var(--accent);
+  color: var(--app-background);
+}
+
+.ui-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  color: var(--app-background);
+}
+
+.ui-btn-danger {
+  color: var(--danger);
+}
+
+.ui-btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.ui-field {
+  height: 2rem;
+  width: 100%;
+  padding: 0 0.65rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-small);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.ui-field::placeholder {
+  color: var(--text-muted);
+}
+
+.ui-field:hover:not(:disabled) {
+  border-color: var(--border-strong);
+}
+
+.ui-field:focus,
+.ui-field:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: none;
+}
+
+.overlay-veil {
+  background: color-mix(in srgb, var(--app-background) 28%, rgb(0 0 0 / 0.42));
+}
+
+.ui-dialog {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-medium);
+  background: var(--surface-elevated);
+  box-shadow: var(--shadow-popover);
+}
+
+.pane-handle {
+  position: relative;
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+}
+
+.pane-handle-line {
+  pointer-events: none;
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border-subtle);
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    width var(--duration-fast) var(--ease-out);
+}
+
+.pane-handle:hover .pane-handle-line,
+.pane-handle[data-state='dragging'] .pane-handle-line {
+  width: 2px;
+  background: var(--accent);
+}
+
+.brand-mark {
+  color: var(--warm-accent);
+  font-family: var(--font-arabic);
+  font-size: 1.15rem;
+  line-height: 1;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-btn,
+  .ui-field,
+  .pane-handle-line,
+  .page-block-caret-icon,
+  .lib-caret-icon,
+  .lib-caret svg,
+  .ProseMirror .toggle > .toggle-arrow svg {
+    transition: none !important;
+  }
+}

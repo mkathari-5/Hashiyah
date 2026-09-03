@@ -90,14 +90,21 @@ export function displayTitleOf(block: Pick<LibraryBlock, 'content' | 'type'>): s
 }
 
 export function childrenOf(blocks: LibraryBlock[], parentId: string | null): LibraryBlock[] {
-  return blocks
-    .filter((block) => block.parentBlockId === parentId)
-    .sort(
-      (a, b) =>
-        a.order - b.order ||
-        Number(isTransientId(a.id)) - Number(isTransientId(b.id)) ||
-        a.id.localeCompare(b.id),
-    )
+  const kids = blocks.filter((block) => block.parentBlockId === parentId)
+  const stored = kids
+    .filter((block) => !isTransientId(block.id))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+  const drafts = kids
+    .filter((block) => isTransientId(block.id))
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+  const next = [...stored]
+  for (const draft of drafts) {
+    const at = Number.isFinite(draft.order)
+      ? Math.max(0, Math.min(Math.round(draft.order), next.length))
+      : next.length
+    next.splice(at, 0, draft)
+  }
+  return next
 }
 
 export function blockById(blocks: LibraryBlock[], id: string): LibraryBlock | undefined {
@@ -253,7 +260,12 @@ export function nextTransients(
     if (!next[rootId] && !omitted.has(rootId)) {
       next[rootId] = makeTransientBlock(pageId, null, 0, 'text', true)
     }
-  } else if (next[rootId] && !next[rootId].content.trim() && focusedId !== rootId) {
+  } else if (
+    next[rootId] &&
+    !next[rootId].content.trim() &&
+    focusedId !== rootId &&
+    next[rootId].createdAt === 0
+  ) {
     delete next[rootId]
   }
 

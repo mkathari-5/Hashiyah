@@ -193,11 +193,11 @@ function DropVeil() {
 function Handle({ onReset }: { onReset?: () => void }) {
   return (
     <Separator
-      className="group relative w-1 shrink-0 cursor-col-resize"
+      className="pane-handle group"
       title={onReset ? 'Drag to resize · double-click to restore' : undefined}
       onDoubleClick={onReset}
     >
-      <div className="bg-line group-hover:bg-accent group-data-[state=dragging]:bg-accent pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors" />
+      <div className="pane-handle-line" />
     </Separator>
   )
 }

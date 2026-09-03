@@ -51,7 +51,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
         <button
           onClick={showLibrary}
           title="Back to the library"
-          className="hover:bg-hover text-ink-muted hover:text-ink flex h-7 flex-1 items-center gap-1.5 rounded px-1.5 text-[11px] font-semibold tracking-wide uppercase"
+          className="hover:bg-hover text-ink-muted hover:text-ink flex h-7 flex-1 items-center gap-1.5 rounded-[var(--radius-small)] px-1.5 text-[11px] font-semibold tracking-wide uppercase"
         >
           <Icon name="chevron-right" className="h-3 w-3 rotate-180" />
           Library
@@ -60,7 +60,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
           onClick={onImport}
           title="Import a PDF"
           aria-label="Import a PDF"
-          className="hover:bg-hover text-ink-muted hover:text-ink grid h-7 w-7 place-items-center rounded"
+          className="ui-btn ui-btn-icon"
         >
           <Icon name="import" />
         </button>

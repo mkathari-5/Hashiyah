@@ -191,13 +191,13 @@ export function CommandPalette({ onImport }: { onImport: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[75] flex items-start justify-center bg-black/40 p-6 pt-[12vh]"
+      className="overlay-veil fixed inset-0 z-[75] flex items-start justify-center p-6 pt-[12vh]"
       onPointerDown={() => setOpen(false)}
     >
       <div
         role="dialog"
         aria-label="Command palette"
-        className="border-line bg-elevated flex max-h-[62vh] w-full max-w-lg flex-col overflow-hidden rounded-lg border shadow-2xl"
+        className="ui-dialog flex max-h-[62vh] w-full max-w-lg flex-col overflow-hidden"
         onPointerDown={(e) => e.stopPropagation()}
       >
         <input
@@ -239,8 +239,8 @@ export function CommandPalette({ onImport }: { onImport: () => void }) {
                     key={command.id}
                     onMouseEnter={() => setIndex(filtered.indexOf(command))}
                     onClick={() => void command.run()}
-                    className={`flex w-full items-center gap-2.5 rounded px-3 py-1.5 text-start text-[13px] ${
-                      selected ? 'bg-hover text-ink' : 'text-ink-muted'
+                    className={`flex w-full items-center gap-2.5 rounded-[var(--radius-small)] px-3 py-1.5 text-start text-[13px] ${
+                      selected ? 'bg-accent-soft text-ink' : 'text-ink-muted'
                     }`}
                   >
                     <Icon name={command.icon} className="text-ink-faint h-3.5 w-3.5" />

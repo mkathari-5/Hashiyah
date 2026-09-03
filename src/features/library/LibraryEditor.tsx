@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryBlocksRepo, libraryPagesRepo } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
@@ -345,9 +345,9 @@ export function LibraryEditor({
       return
     }
     const parent = block.parentBlockId
-    const order = block.order
+    const at = childrenOf(live(), parent).findIndex((row) => row.id === block.id)
     await libraryBlocksRepo.remove(block.id)
-    const next = makeTransientBlock(pageId, parent, order, 'text')
+    const next = makeTransientBlock(pageId, parent, at < 0 ? 0 : at, 'text')
     putTransient(next)
     setFocusCaret('start')
     setFocusId(next.id)
@@ -356,7 +356,10 @@ export function LibraryEditor({
   const enter = async (block: LibraryBlock, caret: number) => {
     const { before, after } = splitContent(block.content, caret)
     const continueType = enterContinuationType(block.type)
-    const kids = childrenOf(live(), block.id)
+    const snapshot = live()
+    const kids = childrenOf(snapshot, block.id)
+    const insertAt = spliceIndexAfter(block, snapshot)
+    const currentIndex = childrenOf(snapshot, block.parentBlockId).findIndex((row) => row.id === block.id)
 
     if (!before.trim() && !after.trim() && isContinueType(block.type) && kids.length === 0) {
       await exitListToText(block)
@@ -373,9 +376,10 @@ export function LibraryEditor({
         putTransient({ ...block, content: after })
         return
       }
-      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, liveBlock.order, continueType)
+      const at = currentIndex < 0 ? 0 : currentIndex
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, at, continueType)
       putTransient(next)
-      await libraryBlocksRepo.move(liveBlock.id, liveBlock.parentBlockId, liveBlock.order + 1)
+      await libraryBlocksRepo.move(liveBlock.id, liveBlock.parentBlockId, at + 1)
       setFocusCaret('start')
       setFocusId(next.id)
       return
@@ -391,13 +395,11 @@ export function LibraryEditor({
       setDrafts((d) => ({ ...d, [liveBlock.id]: before }))
     }
 
-    const all = mergeVisible(await libraryBlocksRepo.forPage(pageId), Object.values(transientsRef.current))
-    const order = spliceIndexAfter(liveBlock, all)
     if (!after.trim()) {
-      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, order, continueType)
-      putTransient(next)
+      const next = makeTransientBlock(pageId, liveBlock.parentBlockId, insertAt, continueType)
       setFocusCaret('start')
       setFocusId(next.id)
+      putTransient(next)
       return
     }
     const created = await libraryBlocksRepo.create({
@@ -405,7 +407,7 @@ export function LibraryEditor({
       parentBlockId: liveBlock.parentBlockId,
       type: continueType,
       content: after,
-      order,
+      order: insertAt,
       expanded: continueType === 'toggle' ? false : undefined,
     })
     setDrafts((d) => ({ ...d, [created.id]: after }))
@@ -641,7 +643,7 @@ export function LibraryEditor({
       setFocusId(last.id)
       return
     }
-    const next = makeTransientBlock(pageId, null, last ? last.order + 1 : 0)
+    const next = makeTransientBlock(pageId, null, last ? spliceIndexAfter(last, blocks) : 0)
     putTransient(next)
     setFocusCaret('start')
     setFocusId(next.id)
@@ -658,7 +660,11 @@ export function LibraryEditor({
     const kids = childrenOf(blocks, parentId)
     if (kids.length === 0) return null
     return (
-      <ul className="page-block-list">
+      <ul
+        className="page-block-list"
+        data-depth={depth}
+        style={{ ['--branch-depth']: depth } as CSSProperties}
+      >
         {kids.map((block) => (
           <li key={block.id}>
             <LibraryBlockRow

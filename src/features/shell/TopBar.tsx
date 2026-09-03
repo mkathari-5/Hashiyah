@@ -20,7 +20,7 @@ export function TopBar({ onImport }: { onImport: () => void }) {
   return (
     <header className="border-line bg-panel flex h-11 shrink-0 items-center gap-2 border-b px-3">
       <div className="flex shrink-0 items-center gap-2">
-        <span className="text-accent font-arabic text-lg leading-none" dir="rtl" aria-hidden>
+        <span className="brand-mark" dir="rtl" aria-hidden>
           ح
         </span>
         <span className="text-ink text-[13px] font-semibold tracking-tight">Ḥāshiyah</span>
@@ -53,10 +53,8 @@ export function TopBar({ onImport }: { onImport: () => void }) {
         <button
           onClick={toggleLessonMode}
           title="Lesson mode  Ctrl+Shift+L"
-          className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs transition-colors ${
-            layout === 'lesson'
-              ? 'bg-accent-soft text-accent'
-              : 'text-ink-muted hover:bg-hover hover:text-ink'
+          className={`ui-btn ${
+            layout === 'lesson' ? 'is-selected' : 'ui-btn-ghost'
           }`}
         >
           <Icon name="clock" className="h-3.5 w-3.5" />
@@ -89,7 +87,7 @@ function IconButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="hover:bg-hover text-ink-muted hover:text-ink grid h-7 w-7 place-items-center rounded"
+      className="ui-btn ui-btn-icon"
     >
       <Icon name={icon} />
     </button>

@@ -13,16 +13,16 @@ export function ShortcutsDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-[75] grid place-items-center bg-black/45 p-6"
+      className="overlay-veil fixed inset-0 z-[75] grid place-items-center p-6"
       onPointerDown={() => setOpen(false)}
     >
       <div
         role="dialog"
         aria-label="Keyboard shortcuts"
-        className="border-line bg-elevated w-full max-w-lg rounded-lg border p-5 shadow-2xl"
+        className="ui-dialog w-full max-w-lg p-5"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <h2 className="text-ink mb-4 text-sm font-semibold">Keyboard shortcuts</h2>
+        <h2 className="text-ink mb-4 text-[13.5px] font-semibold">Keyboard shortcuts</h2>
         <div className="grid gap-5 sm:grid-cols-2">
           {Object.entries(groups).map(([group, items]) => (
             <section key={group}>

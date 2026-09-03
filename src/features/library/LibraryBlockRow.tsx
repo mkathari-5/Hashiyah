@@ -213,7 +213,9 @@ export function LibraryBlockRow({
           ref={areaRef}
           className={`page-block-input page-block-input-${block.type}`}
           rows={1}
+          dir="auto"
           value={block.content}
+          title={block.content || undefined}
           placeholder={placeholderFor(block.type, { focused, transient: isTransient })}
           aria-label={ariaLabelFor(block.type)}
           spellCheck={false}

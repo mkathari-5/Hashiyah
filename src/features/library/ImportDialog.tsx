@@ -65,15 +65,15 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/45 p-6" onPointerDown={onClose}>
+    <div className="overlay-veil fixed inset-0 z-[70] grid place-items-center p-6" onPointerDown={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Import a book"
-        className="border-line bg-elevated w-full max-w-md rounded-lg border p-5 shadow-2xl"
+        className="ui-dialog w-full max-w-md p-5"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <h2 className="text-ink mb-4 text-sm font-semibold">Import a book</h2>
+        <h2 className="text-ink mb-3 text-[13.5px] font-semibold">Import a book</h2>
 
         {!file ? (
           <button
@@ -139,7 +139,7 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
         <div className="mt-5 flex justify-end gap-2">
           <button
             onClick={onClose}
-            className="hover:bg-hover text-ink-muted rounded px-3 py-1.5 text-xs"
+            className="ui-btn ui-btn-ghost"
             disabled={busy}
           >
             Cancel
@@ -147,7 +147,7 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
           <button
             onClick={runImport}
             disabled={!file || busy}
-            className="bg-accent rounded px-3 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+            className="ui-btn ui-btn-primary"
           >
             {busy ? 'Importing…' : 'Import and open'}
           </button>
@@ -178,9 +178,7 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         dir={rtl ? 'rtl' : undefined}
         autoFocus={autoFocus}
-        className={`border-line bg-panel text-ink w-full rounded border px-2 py-1.5 text-xs ${
-          rtl ? 'font-arabic' : ''
-        }`}
+        className={`ui-field ${rtl ? 'font-arabic' : ''}`}
       />
     </label>
   )

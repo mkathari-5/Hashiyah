@@ -642,6 +642,66 @@ describe('Library page editor', () => {
     })
   })
 
+  it('Enter in the middle of nested toggles inserts immediately below, not at the end', async () => {
+    const parent = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'fafawf',
+      expanded: true,
+    })
+    for (const content of ['a', 'b', 'c', 'd', 'f', 'g', 'h']) {
+      await libraryBlocksRepo.create({
+        pageId: ROOT_LIBRARY_PAGE_ID,
+        parentBlockId: parent.id,
+        type: 'toggle',
+        content,
+      })
+    }
+    render(<LibraryHome onImport={() => undefined} />)
+    pressEnter(await screen.findByDisplayValue('f'))
+    const sibling = await waitFor(() => emptyByLabel('Toggle list', parent.id))
+    await waitFor(() => expect(document.activeElement).toBe(sibling))
+    const values = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
+      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+    )
+    expect(values).toEqual(['a', 'b', 'c', 'd', 'f', '', 'g', 'h'])
+    expect(sibling.closest('[data-block-type]')?.getAttribute('data-block-type')).toBe('toggle')
+    expect(await stored()).toHaveLength(8)
+  })
+
+  it('Enter in the middle still inserts below when sibling orders collide', async () => {
+    const parent = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'fafawf',
+      expanded: true,
+    })
+    for (const content of ['a', 'b', 'c', 'd', 'f', 'g', 'h']) {
+      const row = await libraryBlocksRepo.create({
+        pageId: ROOT_LIBRARY_PAGE_ID,
+        parentBlockId: parent.id,
+        type: 'toggle',
+        content,
+      })
+      await libraryBlocksRepo.update(row.id, { order: 0 })
+    }
+    render(<LibraryHome onImport={() => undefined} />)
+    await screen.findByDisplayValue('a')
+    const before = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
+      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+    )
+    expect(before).toHaveLength(7)
+    const focused = before[3]
+    pressEnter(screen.getByDisplayValue(focused!))
+    await waitFor(() => emptyByLabel('Toggle list', parent.id))
+    const values = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
+      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+    )
+    expect(values[4]).toBe('')
+    expect(values[3]).toBe(focused)
+    expect(values[5]).toBe(before[4])
+  })
+
   it('Enter in the middle of a toggle title splits it without moving children', async () => {
     const aqidah = await libraryBlocksRepo.create({
       pageId: ROOT_LIBRARY_PAGE_ID,

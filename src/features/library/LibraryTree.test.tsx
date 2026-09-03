@@ -54,6 +54,18 @@ describe('LibraryTree study sidebar', () => {
     await waitFor(() => expect(useLibraryStore.getState().activeNodeId).toBe(chapter.id))
   })
 
+  it('emphasises the ancestral path of the selected node', async () => {
+    const { chapter } = await seedBook()
+    useLibraryStore.setState({ activeNodeId: chapter.id })
+    render(<LibraryTree variant="sidebar" />)
+
+    await waitFor(() => expect(screen.getByText('Chapter 3')).toBeInTheDocument())
+    expect(screen.getByText('ʿAqīdah').closest('.lib-row')).toHaveClass('is-ancestor')
+    expect(screen.getByText('Kitāb at-Tawḥīd').closest('.lib-row')).toHaveClass('is-ancestor')
+    expect(screen.getByText('Chapter 3').closest('.lib-row')).toHaveClass('is-selected')
+    expect(screen.getByText('Chapter 3').closest('.lib-row')).not.toHaveClass('is-ancestor')
+  })
+
   it('expanding an empty container does not create a child or a draft', async () => {
     const science = await libraryRepo.create({ parentId: null, type: 'science', title: 'Fiqh' })
     await libraryRepo.update(science.id, { collapsed: true })

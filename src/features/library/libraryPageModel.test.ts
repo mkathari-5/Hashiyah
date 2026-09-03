@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LibraryBlock } from '@/types'
 import {
+  childrenOf,
   enterContinuationType,
   filterLibraryBlocks,
   indentPlacement,
@@ -127,6 +128,14 @@ describe('library page model', () => {
     expect(next[transientIdFor(null)]?.type).toBe('toggle')
   })
 
+  it('keeps a user-created empty root sibling until blur, even if it is not focused yet', () => {
+    const first = block({ id: 'a', content: 'Alpha', order: 0 })
+    const draft = makeTransientBlock('p', null, 1, 'toggle')
+    const next = nextTransients('p', [first], { [draft.id]: draft }, new Set(), null)
+    expect(next[transientIdFor(null)]?.type).toBe('toggle')
+    expect(next[transientIdFor(null)]?.order).toBe(1)
+  })
+
   it('drops an unfocused leftover root draft once stored blocks exist', () => {
     const first = block({ id: 'a', content: 'Alpha', order: 0 })
     const leftover = makeTransientBlock('p', null, 0, 'text', true)
@@ -156,5 +165,40 @@ describe('library page model', () => {
     const b = block({ id: 'b', content: 'Later', type: 'toggle', order: 1 })
     expect(spliceIndexAfter(a, [a, b])).toBe(1)
     expect(spliceIndexAfter(b, [a, b])).toBe(2)
+  })
+
+  it('places a transient at its splice index, even when stored orders collide', () => {
+    const parent = block({ id: 'p1', type: 'toggle', content: 'fafawf', expanded: true })
+    const kids = ['a', 'b', 'c', 'd', 'f', 'g', 'h'].map((content, index) =>
+      block({ id: `k${index}`, parentBlockId: 'p1', type: 'toggle', content, order: 0 }),
+    )
+    const draft = makeTransientBlock('p', 'p1', 5, 'toggle')
+    expect(childrenOf([parent, ...kids, draft], 'p1').map((row) => row.id)).toEqual([
+      'k0',
+      'k1',
+      'k2',
+      'k3',
+      'k4',
+      draft.id,
+      'k5',
+      'k6',
+    ])
+  })
+
+  it('places a transient between dense siblings rather than after the next one', () => {
+    const kids = [0, 1, 2, 3, 4, 5, 6].map((order) =>
+      block({ id: `k${order}`, parentBlockId: 'p1', type: 'toggle', content: String(order), order }),
+    )
+    const draft = makeTransientBlock('p', 'p1', 5, 'toggle')
+    expect(childrenOf([...kids, draft], 'p1').map((row) => row.id)).toEqual([
+      'k0',
+      'k1',
+      'k2',
+      'k3',
+      'k4',
+      draft.id,
+      'k5',
+      'k6',
+    ])
   })
 })
