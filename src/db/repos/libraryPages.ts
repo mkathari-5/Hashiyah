@@ -1,5 +1,6 @@
 import { db } from '@/db/db'
 import { newId } from '@/lib/id'
+import type { RichInlineDoc } from '@/lib/richTitle'
 import type { LibraryBlock, LibraryBlockType, LibraryPage } from '@/types'
 
 /**
@@ -19,6 +20,7 @@ export interface CreateBlockInput {
   parentBlockId?: string | null
   type: LibraryBlockType
   content?: string
+  richContent?: RichInlineDoc | null
   order?: number
   expanded?: boolean
   checked?: boolean
@@ -122,6 +124,7 @@ export const libraryBlocksRepo = {
       parentBlockId,
       type: input.type,
       content: input.content ?? '',
+      richContent: input.richContent ?? null,
       order: input.order ?? siblings.length,
       expanded: input.expanded ?? false,
       checked: input.checked,

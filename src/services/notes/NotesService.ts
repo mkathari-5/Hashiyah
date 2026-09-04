@@ -229,6 +229,17 @@ export function countWords(doc: unknown): number {
   return words ? words.length : 0
 }
 
+export function countCharacters(doc: unknown): number {
+  const parts: string[] = []
+  const visit = (node: RawNode | undefined) => {
+    if (!node || typeof node !== 'object') return
+    if (typeof node.text === 'string') parts.push(node.text)
+    node.content?.forEach(visit)
+  }
+  visit(doc as RawNode)
+  return parts.join('').length
+}
+
 export class NoteValidationError extends Error {}
 
 /**

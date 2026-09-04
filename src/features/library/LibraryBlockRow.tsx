@@ -1,6 +1,8 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useRef, type CSSProperties } from 'react'
 import type { LibraryBlock } from '@/types'
 import { Icon } from '@/features/shell/Icon'
+import { RichTitleView } from '@/features/library/RichTitleView'
+import { TitleInlineEditor } from '@/features/library/TitleInlineEditor'
 import {
   ariaLabelFor,
   isTransientId,
@@ -8,6 +10,7 @@ import {
   PAGE_INDENT_REM,
   placeholderFor,
 } from '@/features/library/libraryPageModel'
+import type { RichInlineDoc } from '@/lib/richTitle'
 
 export function LibraryBlockRow({
   block,
@@ -26,6 +29,7 @@ export function LibraryBlockRow({
   onOpenPage,
   onTodo,
   onInsert,
+  onContextMenu,
   onDragStart,
   onDragOver,
   onDrop,
@@ -41,14 +45,15 @@ export function LibraryBlockRow({
   gutterOn: boolean
   onHover: (id: string | null) => void
   onFocus: (id: string) => void
-  onChange: (id: string, content: string, caret: number) => void
-  onKeyDown: (id: string, event: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onChange: (id: string, content: string, caret: number, rich: RichInlineDoc | null) => void
+  onKeyDown: (id: string, event: KeyboardEvent, caret: number, empty: boolean, collapsed: boolean, plain?: string, rich?: RichInlineDoc | null) => boolean
   onBlurEmpty: (id: string) => void
   onToggle: (id: string) => void
   onOpenStudy: (nodeId: string) => void
   onOpenPage: (pageId: string) => void
   onTodo: (id: string, checked: boolean) => void
   onInsert: (id: string, anchor: HTMLElement) => void
+  onContextMenu?: (id: string, event: React.MouseEvent) => void
   onDragStart: (id: string) => void
   onDragOver: (id: string, event: React.DragEvent) => void
   onDrop: (id: string) => void
@@ -56,44 +61,16 @@ export function LibraryBlockRow({
   dragging: boolean
   dropTarget: boolean
 }) {
-  const areaRef = useRef<HTMLTextAreaElement>(null)
-  const focusedRef = useRef(focused)
-  focusedRef.current = focused
-
-  useEffect(() => {
-    const el = areaRef.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [block.content, block.type])
-
-  useEffect(() => {
-    if (!focused) return
-    const el = areaRef.current
-    if (!el) return
-    const frame = requestAnimationFrame(() => {
-      if (!focusedRef.current) return
-      const target = areaRef.current
-      if (!target) return
-      if (document.activeElement === target) return
-      target.focus()
-      const pos = focusCaret === 'start' ? 0 : target.value.length
-      target.setSelectionRange(pos, pos)
-    })
-    return () => cancelAnimationFrame(frame)
-  }, [focused, block.id, focusCaret])
-
+  const hostRef = useRef<HTMLDivElement>(null)
   const isToggle = block.type === 'toggle'
   const isTransient = isTransientId(block.id)
   const nestedDraft = isTransient && !!block.parentBlockId
-
-  const focusEditor = () => {
-    onFocus(block.id)
-    areaRef.current?.focus()
-  }
+  const placeholder = placeholderFor(block.type, { focused, transient: isTransient })
+  const ariaLabel = ariaLabelFor(block.type)
 
   return (
     <div
+      ref={hostRef}
       className={`page-block page-block-${block.type}${focused ? ' is-focused' : ''}${gutterOn ? ' is-gutter-on' : ''}${dropTarget ? ' is-drop' : ''}${dragging ? ' is-dragging' : ''}`}
       data-block-id={block.id}
       data-block-type={block.type}
@@ -107,9 +84,27 @@ export function LibraryBlockRow({
       onMouseLeave={() => onHover(null)}
       onClick={(event) => {
         const target = event.target as HTMLElement
-        if (target.closest('button, input[type="checkbox"], a, textarea')) return
+        if (target.closest('button, input[type="checkbox"], a, [data-title-editor], .title-pm')) return
         if (block.type === 'study' || block.type === 'page' || block.type === 'divider') return
-        focusEditor()
+        onFocus(block.id)
+      }}
+      onContextMenu={(event) => {
+        const target = event.target as HTMLElement
+        const inTitle = target.closest('[data-title-editor], .title-pm, .rich-title')
+        const selection = window.getSelection()
+        if (
+          inTitle &&
+          selection &&
+          !selection.isCollapsed &&
+          selection.anchorNode &&
+          inTitle.contains(selection.anchorNode)
+        ) {
+          return
+        }
+        if (!onContextMenu) return
+        event.preventDefault()
+        event.stopPropagation()
+        onContextMenu(block.id, event)
       }}
       onDragOver={(event) => onDragOver(block.id, event)}
       onDrop={(event) => {
@@ -208,29 +203,48 @@ export function LibraryBlockRow({
         >
           <span className="page-block-page-title">{block.content || 'Page'}</span>
         </button>
-      ) : (
-        <textarea
-          ref={areaRef}
+      ) : focused || isTransient ? (
+        <TitleInlineEditor
+          key={block.id}
+          id={block.id}
+          plain={block.content}
+          rich={block.richContent}
+          ariaLabel={ariaLabel}
+          placeholder={placeholder}
           className={`page-block-input page-block-input-${block.type}`}
-          rows={1}
-          dir="auto"
-          value={block.content}
-          title={block.content || undefined}
-          placeholder={placeholderFor(block.type, { focused, transient: isTransient })}
-          aria-label={ariaLabelFor(block.type)}
-          spellCheck={false}
+          caret={focusCaret}
+          autoFocus={focused}
           onFocus={() => onFocus(block.id)}
-          onClick={() => onFocus(block.id)}
           onBlur={() => onBlurEmpty(block.id)}
-          onChange={(event) =>
-            onChange(
-              block.id,
-              event.currentTarget.value,
-              event.currentTarget.selectionStart ?? event.currentTarget.value.length,
-            )
+          onChange={(content, rich, caret) => onChange(block.id, content, caret, rich)}
+          onKeyDown={(event, caret, empty, collapsed, nextPlain, nextRich) =>
+            onKeyDown(block.id, event, caret, empty, collapsed, nextPlain, nextRich)
           }
-          onKeyDown={(event) => onKeyDown(block.id, event)}
         />
+      ) : (
+        <button
+          type="button"
+          className={`page-block-input page-block-input-${block.type} is-idle`}
+          data-plain={block.content}
+          data-placeholder={placeholder}
+          aria-label={ariaLabel}
+          title={block.content || undefined}
+          onClick={() => onFocus(block.id)}
+          onKeyDown={(event) => {
+            const handled = onKeyDown(
+              block.id,
+              event.nativeEvent,
+              block.content.length,
+              !block.content.trim(),
+              true,
+              block.content,
+              block.richContent ?? null,
+            )
+            if (handled) event.preventDefault()
+          }}
+        >
+          <RichTitleView plain={block.content} rich={block.richContent} />
+        </button>
       )}
     </div>
   )

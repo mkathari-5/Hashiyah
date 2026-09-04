@@ -6,6 +6,7 @@ import { notesRepo } from '@/db/repos/notes'
 import { NodeTitle } from '@/features/library/LibraryTree'
 import { NoteEditor, type NoteEditorHandle } from '@/features/notes/NoteEditor'
 import { OutlinePopover } from '@/features/notes/OutlinePopover'
+import { ConfirmDialog } from '@/features/shell/ConfirmDialog'
 import { Icon } from '@/features/shell/Icon'
 import { displayTitle } from '@/lib/bookTitle'
 import { useAppStore } from '@/state/useAppStore'
@@ -41,7 +42,11 @@ export function NotesPanel() {
   const [outlineOpen, setOutlineOpen] = useState(false)
   const [outline, setOutline] = useState<OutlineEntry[]>([])
   const [menuOpen, setMenuOpen] = useState(false)
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [deleteOpen, setDeleteOpen] = useState(false)
   const [words, setWords] = useState(0)
+  const [characters, setCharacters] = useState(0)
   const [savedLabel, setSavedLabel] = useState(false)
 
   /**
@@ -120,7 +125,10 @@ export function NotesPanel() {
     setActiveNote(note.id)
   }, [bookId, book, noteList.length, setActiveNote])
 
-  const onStats = useCallback((stats: { words: number }) => setWords(stats.words), [])
+  const onStats = useCallback((stats: { words: number; characters: number }) => {
+    setWords(stats.words)
+    setCharacters(stats.characters)
+  }, [])
 
   // Only truly empty when there is neither a book nor a notes-only item open.
   if (!bookId && !activeNoteId) {
@@ -283,11 +291,11 @@ export function NotesPanel() {
             {canManageNote && (
               <MenuItem
                 label="Rename note"
-                onClick={async () => {
+                onClick={() => {
                   setMenuOpen(false)
                   if (!active) return
-                  const next = window.prompt('Note title', active.title)?.trim()
-                  if (next) await notesRepo.update(active.id, { title: next })
+                  setRenameValue(active.title)
+                  setRenameOpen(true)
                 }}
               />
             )}
@@ -295,12 +303,10 @@ export function NotesPanel() {
               <MenuItem
                 label="Delete note"
                 danger
-                onClick={async () => {
+                onClick={() => {
                   setMenuOpen(false)
                   if (!active) return
-                  if (!window.confirm(`Delete “${active.title}”? This cannot be undone.`)) return
-                  await notesRepo.remove(active.id)
-                  setActiveNote(null)
+                  setDeleteOpen(true)
                 }}
               />
             )}
@@ -347,10 +353,54 @@ export function NotesPanel() {
           repeating it here was the third copy on one screen. */}
       <footer className="notes-status">
         <span>{saving ? 'Saving…' : savedLabel ? 'Saved' : ''}</span>
-        <span className="ms-auto tabular-nums">{words ? `${words} words` : ''}</span>
+        <span className="ms-auto tabular-nums">
+          {words ? `${words} words · ${characters} characters` : ''}
+        </span>
       </footer>
 
       <OutlineSync editorRef={editorRef} open={outlineOpen} onOutline={setOutline} />
+
+      {renameOpen && active && (
+        <ConfirmDialog
+          title="Rename note"
+          body=""
+          confirmLabel="Save"
+          danger={false}
+          onCancel={() => setRenameOpen(false)}
+          onConfirm={() => {
+            const next = renameValue.trim()
+            if (next) void notesRepo.update(active.id, { title: next })
+            setRenameOpen(false)
+          }}
+        >
+          <input
+            className="confirm-input"
+            value={renameValue}
+            aria-label="Note title"
+            onChange={(event) => setRenameValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                const next = renameValue.trim()
+                if (next) void notesRepo.update(active.id, { title: next })
+                setRenameOpen(false)
+              }
+            }}
+          />
+        </ConfirmDialog>
+      )}
+      {deleteOpen && active && (
+        <ConfirmDialog
+          title="Delete note"
+          body={`Delete “${active.title}”? Its contents will be removed. The PDF itself is kept.`}
+          onCancel={() => setDeleteOpen(false)}
+          onConfirm={() => {
+            const id = active.id
+            setDeleteOpen(false)
+            void notesRepo.remove(id).then(() => setActiveNote(null))
+          }}
+        />
+      )}
     </div>
   )
 }

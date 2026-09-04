@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { insertTableSafely } from '@/features/notes/insertHelpers'
 import { SEMANTIC_KINDS } from '@/features/notes/extensions/SemanticBlock'
 import { insertIslamicPhrase, ISLAMIC_PHRASES } from '@/features/notes/islamicPhrases'
 import { openQuranPicker } from '@/features/notes/QuranPicker'
@@ -244,7 +245,7 @@ const MEDIA: BlockDef[] = [
     group: 'Media',
     icon: '▦',
     keywords: ['table', 'grid', 'rows', 'columns'],
-    run: (e) => e.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+    run: (e) => insertTableSafely(e),
   },
   {
     id: 'image',

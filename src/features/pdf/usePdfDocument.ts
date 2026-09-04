@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { documentsRepo } from '@/db/repos/documents'
+import { describePdfOpenError } from '@/services/pdf/pdfErrors'
 import { loadPdf, type PDFDocumentProxy } from '@/services/pdf/pdfjs'
 
 export interface PdfHandle {
@@ -8,6 +9,7 @@ export interface PdfHandle {
   /** height / width of page 1, used to size not-yet-rendered page slots. */
   aspect: number
   baseWidth: number
+  baseHeight: number
 }
 
 interface State {
@@ -46,7 +48,13 @@ export function usePdfDocument(documentId: string | null): State {
           return
         }
         setState({
-          handle: { pdf, pageCount, aspect: viewport.height / viewport.width, baseWidth: viewport.width },
+          handle: {
+            pdf,
+            pageCount,
+            aspect: viewport.height / viewport.width,
+            baseWidth: viewport.width,
+            baseHeight: viewport.height,
+          },
           loading: false,
           error: null,
         })
@@ -55,7 +63,7 @@ export function usePdfDocument(documentId: string | null): State {
         setState({
           handle: null,
           loading: false,
-          error: error instanceof Error ? error.message : 'This PDF could not be opened.',
+          error: describePdfOpenError(error),
         })
       }
     })()

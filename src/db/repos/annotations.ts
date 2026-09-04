@@ -23,6 +23,13 @@ export const annotationsRepo = {
     })
   },
 
+  async restore(annotation: Annotation, anchor: AnnotationAnchor) {
+    await db.transaction('rw', db.annotations, db.anchors, async () => {
+      await db.annotations.put(annotation)
+      await db.anchors.put(anchor)
+    })
+  },
+
   update: (id: string, patch: Partial<Annotation>) =>
     db.annotations.update(id, { ...patch, updatedAt: Date.now() }),
 

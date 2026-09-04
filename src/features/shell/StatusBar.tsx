@@ -30,6 +30,10 @@ export function StatusBar() {
     if (!documentId) return 0
     return db.annotations.where('[documentId+pageNumber]').equals([documentId, currentPage]).count()
   }, [documentId, currentPage], 0)
+  const marksOnPage = useLiveQuery(async () => {
+    if (!documentId) return 0
+    return db.pageMarks.where('[documentId+pageNumber]').equals([documentId, currentPage]).count()
+  }, [documentId, currentPage], 0)
 
   const indexing = documentId && pageCount > 0 && indexed < pageCount
   const noTextLayer = pageOnScreen && !pageOnScreen.hasTextLayer
@@ -52,13 +56,13 @@ export function StatusBar() {
       {noTextLayer && pageOnScreen?.textSource !== 'ocr' && (
         <span
           className="text-hl-rose"
-          title="This page has no embedded text. Use Recognise text in the reader to run local OCR."
+          title="This page has no embedded text. Local OCR runs on the visible page."
         >
           Image-only page
         </span>
       )}
       {pageOnScreen?.textSource === 'ocr' && pageOnScreen.hasTextLayer && (
-        <span className="text-ink-muted" title="Text on this page was recognised locally (Tesseract). Accuracy varies.">
+        <span className="text-ink-muted" title="Text on this page was recognised locally (Tesseract). Accuracy varies — check it against the page.">
           OCR text
         </span>
       )}
@@ -70,9 +74,9 @@ export function StatusBar() {
       )}
 
       <div className="ms-auto flex items-center gap-3">
-        {notesOnPage > 0 && (
+        {notesOnPage + marksOnPage > 0 && (
           <span className="tabular-nums">
-            {notesOnPage} {notesOnPage === 1 ? 'annotation' : 'annotations'} on this page
+            {notesOnPage + marksOnPage} {(notesOnPage + marksOnPage) === 1 ? 'annotation' : 'annotations'} on this page
           </span>
         )}
 

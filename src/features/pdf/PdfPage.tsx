@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { recordMarkCreated } from '@/services/annotations/history'
 import { pagesRepo } from '@/db/repos/documents'
+import { applySelectionMarkup, createTrackedMark, deleteAnnotationMark } from '@/features/pdf/annotationActions'
 import { OcrTextLayer } from '@/features/pdf/OcrTextLayer'
 import { normalizeForSearch } from '@/lib/arabic'
 import { pageId } from '@/lib/id'
 import { AnnotationEngine } from '@/services/annotations/AnnotationEngine'
 import { captureSelection, offsetsToRects, type PageTextContext } from '@/services/annotations/selection'
+import { clientRectToNormalized, clientToNormalized, horizontalLineFromDrag, underlineRectsForSelection, type PageRotation } from '@/services/pdf/pageCoords'
 import { buildPageText } from '@/services/pdf/pageText'
 import { pdfjs, type PDFDocumentProxy } from '@/services/pdf/pdfjs'
 import { useStudyStore } from '@/state/useStudyStore'
@@ -27,6 +30,9 @@ interface Props {
   visible: boolean
   aspect: number
   registry: PageContextRegistry
+  rotation?: PageRotation
+  pdfPageWidth: number
+  pdfPageHeight: number
 }
 
 interface RenderedHighlight {
@@ -35,20 +41,35 @@ interface RenderedHighlight {
   degraded: boolean
 }
 
-export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, aspect, registry }: Props) {
+export function PdfPage({
+  pdf,
+  documentId,
+  bookId,
+  pageNumber,
+  width,
+  visible,
+  aspect,
+  registry,
+  rotation = 0,
+  pdfPageWidth,
+  pdfPageHeight,
+}: Props) {
   const pageRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
   const ctxRef = useRef<PageTextContext | null>(null)
+  const dragStart = useRef<{ x: number; y: number } | null>(null)
   const [textReady, setTextReady] = useState(false)
   const [height, setHeight] = useState(() => Math.round(width * aspect))
   const [useOcrOverlay, setUseOcrOverlay] = useState(false)
+  const [draftRect, setDraftRect] = useState<NormalizedRect | null>(null)
 
   const setSelection = useStudyStore((s) => s.setSelection)
   const setActiveAnnotation = useStudyStore((s) => s.setActiveAnnotation)
   const requestReveal = useStudyStore((s) => s.requestReveal)
   const activeAnnotationId = useStudyStore((s) => s.activeAnnotationId)
   const jumpRequest = useStudyStore((s) => s.jumpRequest)
+  const pdfTool = useStudyStore((s) => s.pdfTool)
 
   const pageRecord = useLiveQuery(
     () => (visible ? pagesRepo.get(documentId, pageNumber) : undefined),
@@ -66,7 +87,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
     [pageNumber, registry],
   )
 
-  // ── Render canvas + embedded text layer ───────────────────────────────────
   useEffect(() => {
     if (!visible || width <= 0) return
     let cancelled = false
@@ -77,9 +97,10 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       const page = await pdf.getPage(pageNumber)
       if (cancelled) return
 
-      const base = page.getViewport({ scale: 1 })
+      const userRotation = (page.rotate + rotation) % 360
+      const base = page.getViewport({ scale: 1, rotation: userRotation })
       const scale = width / base.width
-      const viewport = page.getViewport({ scale })
+      const viewport = page.getViewport({ scale, rotation: userRotation })
       const canvas = canvasRef.current
       const pageEl = pageRef.current
       const textEl = textLayerRef.current
@@ -113,8 +134,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       const { text, itemOffsets } = buildPageText(items)
       const hasEmbedded = text.trim().length > 0
 
-      // Prefer a live OCR overlay when this page was recognised and has no
-      // usable embedded text — pdf.js would otherwise leave an empty layer.
       const stored = await pagesRepo.get(documentId, pageNumber)
       const preferOcr =
         !hasEmbedded &&
@@ -134,8 +153,6 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       await textLayer.render()
       if (cancelled) return
 
-      // pdf.js uses an end-of-content marker so drag-selections that start in
-      // whitespace still expand across spans (viewer helper behaviour).
       const end = document.createElement('div')
       end.className = 'endOfContent'
       textEl.appendChild(end)
@@ -153,8 +170,7 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         rotation: viewport.rotation,
       })
 
-      // Index on sight, and correct a stale "image-only" row when embedded text
-      // is actually present (import can race ahead of a failed extract).
+      const unrotated = page.getViewport({ scale: 1 })
       const next = {
         id: pageId(documentId, pageNumber),
         documentId,
@@ -162,9 +178,9 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         text,
         normalizedText: normalizeForSearch(text),
         itemOffsets,
-        width: base.width,
-        height: base.height,
-        rotation: base.rotation,
+        width: unrotated.width,
+        height: unrotated.height,
+        rotation: unrotated.rotation,
         hasTextLayer: hasEmbedded,
         textSource: (hasEmbedded
           ? 'embedded'
@@ -173,11 +189,13 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
             : 'none') satisfies TextSource as TextSource,
         indexedAt: Date.now(),
         ocrWords: hasEmbedded ? undefined : stored?.ocrWords,
+        ocrLanguage: hasEmbedded ? undefined : stored?.ocrLanguage,
+        ocrEngine: hasEmbedded ? undefined : stored?.ocrEngine,
+        ocrModelVersion: hasEmbedded ? undefined : stored?.ocrModelVersion,
       } satisfies PageRecord
       if (!stored || (hasEmbedded && (!stored.hasTextLayer || stored.textSource !== 'embedded'))) {
         await pagesRepo.put(next)
       } else if (!stored.hasTextLayer && !hasEmbedded && stored.textSource !== 'ocr') {
-        // Keep the empty marker so the status bar can offer OCR.
         if (stored.textSource !== 'none') await pagesRepo.put({ ...stored, textSource: 'none' })
       }
     })()
@@ -188,9 +206,8 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
       textLayer?.cancel()
       publishCtx(null)
     }
-  }, [pdf, pageNumber, width, visible, documentId, publishCtx, pageRecord?.textSource, pageRecord?.indexedAt])
+  }, [pdf, pageNumber, width, visible, documentId, publishCtx, pageRecord?.textSource, pageRecord?.indexedAt, rotation])
 
-  // ── Annotations on this page ──────────────────────────────────────────────
   const resolved = useLiveQuery(
     () => (visible ? AnnotationEngine.resolveForPage(documentId, pageNumber) : Promise.resolve([])),
     [documentId, pageNumber, visible],
@@ -222,21 +239,83 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
     return () => clearTimeout(timer)
   }, [jumpRequest, highlights])
 
+  const pageBox = () => {
+    const el = pageRef.current
+    if (!el) return null
+    const box = el.getBoundingClientRect()
+    return { left: box.left, top: box.top, width: box.width, height: box.height }
+  }
+
+  const handlePointerDown = (event: React.PointerEvent) => {
+    if (event.button !== 0) return
+    dragStart.current = { x: event.clientX, y: event.clientY }
+    setDraftRect(null)
+    if (pdfTool === 'highlight' || pdfTool === 'underline') {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }
+
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (!dragStart.current || (pdfTool !== 'highlight' && pdfTool !== 'underline')) return
+    const box = pageBox()
+    if (!box) return
+    if (pdfTool === 'underline') {
+      const start = clientToNormalized(dragStart.current, box, rotation)
+      const end = clientToNormalized({ x: event.clientX, y: event.clientY }, box, rotation)
+      setDraftRect(horizontalLineFromDrag(start, end))
+      return
+    }
+    const rect = clientRectToNormalized(dragStart.current, { x: event.clientX, y: event.clientY }, box, rotation, {
+      clamp: true,
+      minSize: 0.008,
+    })
+    setDraftRect(rect)
+  }
+
   const handlePointerUp = useCallback(
     (event: React.PointerEvent) => {
+      const start = dragStart.current
+      dragStart.current = null
+      setDraftRect(null)
       const ctx = ctxRef.current
-      if (!ctx) return
       const selection = window.getSelection()
+      const box = pageBox()
 
-      if (selection && !selection.isCollapsed) {
+      if (pdfTool === 'text' || pdfTool === 'pan') return
+
+      if (pdfTool === 'erase') {
+        if (!box) return
+        const x = (event.clientX - box.left) / box.width
+        const y = (event.clientY - box.top) / box.height
+        const hit = highlights.find((h) =>
+          h.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
+        )
+        if (hit) void deleteAnnotationMark(hit.annotation.id)
+        return
+      }
+
+      if (selection && !selection.isCollapsed && ctx) {
         const capture = captureSelection(selection, ctx)
         if (capture) {
-          const rects = selection.getRangeAt(0).getClientRects()
-          const last = rects[rects.length - 1]
-          setSelection({
+          const live = {
             capture,
             documentId,
             bookId,
+            menuLeft: event.clientX,
+            menuTop: event.clientY,
+          }
+          if (pdfTool === 'highlight') {
+            void applySelectionMarkup('highlight', live)
+            return
+          }
+          if (pdfTool === 'underline') {
+            void applySelectionMarkup('underline', live)
+            return
+          }
+          const rects = selection.getRangeAt(0).getClientRects()
+          const last = rects[rects.length - 1]
+          setSelection({
+            ...live,
             menuLeft: last ? last.left + last.width / 2 : event.clientX,
             menuTop: last ? last.top : event.clientY,
           })
@@ -244,9 +323,47 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         }
       }
 
-      const pageEl = pageRef.current
-      if (!pageEl) return
-      const box = pageEl.getBoundingClientRect()
+      if (start && box && (pdfTool === 'highlight' || pdfTool === 'underline')) {
+        if (pdfTool === 'underline') {
+          const from = clientToNormalized(start, box, rotation)
+          const to = clientToNormalized({ x: event.clientX, y: event.clientY }, box, rotation)
+          const rect = horizontalLineFromDrag(from, to)
+          if (rect.w >= 0.012) {
+            void createTrackedMark({
+              bookId,
+              documentId,
+              pageNumber,
+              kind: 'line',
+              rect,
+              pageRotation: rotation,
+              pageWidth: pageRecord?.width ?? pdfPageWidth,
+              pageHeight: pageRecord?.height ?? pdfPageHeight,
+              style: { strokeColor: '#6b5344', strokeWidth: 2 },
+            }).then((created) => recordMarkCreated(created))
+          }
+          return
+        }
+        const rect = clientRectToNormalized(start, { x: event.clientX, y: event.clientY }, box, rotation, {
+          clamp: true,
+          minSize: 0.012,
+        })
+        if (rect) {
+          void createTrackedMark({
+            bookId,
+            documentId,
+            pageNumber,
+            kind: 'area',
+            rect,
+            pageRotation: rotation,
+            pageWidth: pageRecord?.width ?? pdfPageWidth,
+            pageHeight: pageRecord?.height ?? pdfPageHeight,
+            style: { fillColor: '#d8a13d', fillOpacity: 0.28 },
+          }).then((created) => recordMarkCreated(created))
+          return
+        }
+      }
+
+      if (!box) return
       const x = (event.clientX - box.left) / box.width
       const y = (event.clientY - box.top) / box.height
       const hit = highlights.find((h) =>
@@ -262,10 +379,23 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
         setActiveAnnotation(null)
       }
     },
-    [documentId, bookId, highlights, setSelection, setActiveAnnotation, requestReveal],
+    [
+      documentId,
+      bookId,
+      highlights,
+      setSelection,
+      setActiveAnnotation,
+      requestReveal,
+      pdfTool,
+      rotation,
+      pageNumber,
+      pageRecord?.width,
+      pageRecord?.height,
+      pdfPageWidth,
+      pdfPageHeight,
+    ],
   )
 
-  // While dragging, mark the layer so pdf.js CSS expands selection through gaps.
   useEffect(() => {
     const el = pageRef.current
     if (!el) return
@@ -281,25 +411,34 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
 
   const ocrWords = pageRecord?.ocrWords ?? []
   const showOcr = useOcrOverlay && ocrWords.length > 0 && pageRecord?.textSource === 'ocr'
+  const toolClass =
+    pdfTool === 'text' || pdfTool === 'pan' || pdfTool === 'erase'
+      ? `is-tool-${pdfTool}`
+      : pdfTool === 'highlight' || pdfTool === 'underline'
+        ? `is-tool-${pdfTool}`
+        : ''
 
   return (
     <div
       ref={pageRef}
-      className="pdf-page mx-auto"
+      className={`pdf-page mx-auto ${toolClass}`.trim()}
       style={{ width, height }}
       data-page={pageNumber}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
       <canvas ref={canvasRef} aria-label={`Page ${pageNumber}`} />
 
       <div className="highlight-layer">
         {highlights.map(({ annotation, rects, degraded }) =>
-          rects.map((r, i) => (
+          (annotation.kind === 'underline' ? underlineRectsForSelection(rects) : rects).map((r, i) => (
             <div
               key={`${annotation.id}:${i}`}
               className={[
-                annotation.kind === 'capture' ? 'hl-capture-region' : 'hl',
-                annotation.kind === 'capture' ? '' : `hl-${annotation.color}`,
+                annotation.kind === 'capture' ? 'hl-capture-region' : annotation.kind === 'underline' ? 'hl-underline' : 'hl',
+                annotation.kind === 'capture' || annotation.kind === 'underline' ? '' : `hl-${annotation.color}`,
+                annotation.kind === 'underline' ? `hl-underline-${annotation.color}` : '',
                 activeAnnotationId === annotation.id ? 'hl-active' : '',
                 pulseId === annotation.id ? 'hl-pulse' : '',
                 degraded ? 'opacity-60' : '',
@@ -315,6 +454,17 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
             />
           )),
         )}
+        {draftRect && (
+          <div
+            className={pdfTool === 'underline' ? 'hl-underline hl-underline-amber' : 'hl hl-amber'}
+            style={{
+              left: `${draftRect.x * 100}%`,
+              top: `${draftRect.y * 100}%`,
+              width: `${draftRect.w * 100}%`,
+              height: `${draftRect.h * 100}%`,
+            }}
+          />
+        )}
       </div>
 
       <div ref={textLayerRef} className="textLayer" hidden={showOcr} />
@@ -328,6 +478,10 @@ export function PdfPage({ pdf, documentId, bookId, pageNumber, width, visible, a
           pageEl={pageRef.current}
           onReady={publishCtx}
         />
+      )}
+
+      {showOcr && (
+        <span className="ocr-source-label">Machine-recognised text — check against the page</span>
       )}
 
       {!visible && (

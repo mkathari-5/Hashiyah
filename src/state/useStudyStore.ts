@@ -4,17 +4,12 @@ import { documentsRepo } from '@/db/repos/documents'
 import { notesRepo } from '@/db/repos/notes'
 import { readingStateRepo } from '@/db/repos/session'
 import type { CapturedSelection } from '@/services/annotations/selection'
-
-/**
- * The state of *studying* — which book is open, where in it we are, what is
- * selected, and the two cross-panel intents (jump to a source, reveal a note).
- *
- * Those two intents are modelled as one-shot "requests" carrying a nonce rather
- * than as booleans, so asking twice for the same target still fires twice.
- */
+import type { OcrLanguage } from '@/types'
 
 /** 'capture' inserts the region; 'explain' also drops a paragraph beneath (§D10). */
 export type SnipMode = null | 'capture' | 'explain'
+
+export type PdfTool = 'select' | 'pan' | 'text' | 'highlight' | 'underline' | 'erase'
 
 export interface JumpRequest {
   annotationId: string
@@ -53,6 +48,13 @@ interface StudyState {
   lessonStartedAt: number | null
   /** null = normal reading; otherwise the reader is dragging out a capture. */
   snipMode: SnipMode
+  pdfTool: PdfTool
+  pageRotation: 0 | 90 | 180 | 270
+  ocrLanguage: OcrLanguage
+  selectedMarkId: string | null
+  editingMarkId: string | null
+  /** True while a mark is being dragged or resized — viewer pan must not run. */
+  annotationGesture: boolean
 
   openBook: (bookId: string) => Promise<void>
   closeBook: () => void
@@ -70,6 +72,12 @@ interface StudyState {
   startLessonTimer: () => void
   stopLessonTimer: () => void
   setSnipMode: (mode: SnipMode) => void
+  setPdfTool: (tool: PdfTool) => void
+  setPageRotation: (rotation: 0 | 90 | 180 | 270) => void
+  setOcrLanguage: (language: OcrLanguage) => void
+  setSelectedMarkId: (id: string | null) => void
+  setEditingMarkId: (id: string | null) => void
+  setAnnotationGesture: (active: boolean) => void
 }
 
 let nonce = 0
@@ -89,6 +97,12 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   restoredScrollRatio: null,
   lessonStartedAt: null,
   snipMode: null,
+  pdfTool: 'select',
+  pageRotation: 0,
+  ocrLanguage: 'ara+eng',
+  selectedMarkId: null,
+  editingMarkId: null,
+  annotationGesture: false,
 
   async openBook(bookId) {
     if (get().bookId === bookId) return
@@ -117,6 +131,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       restoredScrollRatio: state?.scrollRatio ?? 0,
       selection: null,
       activeAnnotationId: null,
+      pdfTool: 'select',
+      pageRotation: 0,
+      selectedMarkId: null,
+      editingMarkId: null,
     })
     void booksRepo.touch(bookId)
   },
@@ -131,6 +149,9 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       selection: null,
       activeAnnotationId: null,
       restoredScrollRatio: null,
+      pdfTool: 'select',
+      selectedMarkId: null,
+      editingMarkId: null,
     }),
 
   setPage(page) {
@@ -174,4 +195,17 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   // Entering capture mode always clears any live text selection: the two are
   // different ways of pointing at the page and should never be active at once.
   setSnipMode: (snipMode) => set({ snipMode, selection: snipMode ? null : get().selection }),
+  setPdfTool: (pdfTool) =>
+    set({
+      pdfTool,
+      snipMode: null,
+      selectedMarkId: pdfTool === 'select' ? get().selectedMarkId : null,
+      // Leaving the text tool must drop the textarea so Select can drag the box.
+      editingMarkId: pdfTool === 'text' ? get().editingMarkId : null,
+    }),
+  setPageRotation: (pageRotation) => set({ pageRotation }),
+  setOcrLanguage: (ocrLanguage) => set({ ocrLanguage }),
+  setSelectedMarkId: (selectedMarkId) => set({ selectedMarkId, activeAnnotationId: selectedMarkId ? null : get().activeAnnotationId }),
+  setEditingMarkId: (editingMarkId) => set({ editingMarkId }),
+  setAnnotationGesture: (annotationGesture) => set({ annotationGesture }),
 }))

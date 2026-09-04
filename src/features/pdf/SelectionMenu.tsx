@@ -28,6 +28,7 @@ const PRIMARY_ACTIONS: Action[] = [
   { id: 'send', label: 'Send to notes' },
   { id: 'copy', label: 'Copy', hint: 'Ctrl C' },
   { id: 'highlight', label: 'Highlight', hint: 'Ctrl H' },
+  { id: 'underline', label: 'Underline' },
 ]
 
 const OVERFLOW_ACTIONS: Action[] = [

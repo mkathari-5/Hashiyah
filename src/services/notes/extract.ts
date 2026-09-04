@@ -1,6 +1,7 @@
 import { booksRepo } from '@/db/repos/library'
 import { notesRepo } from '@/db/repos/notes'
 import { AnnotationEngine } from '@/services/annotations/AnnotationEngine'
+import { recordAnnotationCreated } from '@/services/annotations/history'
 import { KIND_META } from '@/services/annotations/kinds'
 import { capturePdfRegion } from '@/services/pdf/capture'
 import type { PDFDocumentProxy } from '@/services/pdf/pdfjs'
@@ -30,7 +31,7 @@ async function ensureActiveNote(bookId: string): Promise<string> {
 }
 
 function shapeFor(kind: AnnotationKind): { shape: InsertShape; blockKind: string | null } {
-  if (kind === 'highlight') return { shape: 'quote', blockKind: null }
+  if (kind === 'highlight' || kind === 'underline') return { shape: 'quote', blockKind: null }
   const block = KIND_META[kind].block
   return block ? { shape: 'semantic', blockKind: block } : { shape: 'explain', blockKind: null }
 }
@@ -45,15 +46,19 @@ function shapeFor(kind: AnnotationKind): { shape: InsertShape; blockKind: string
 export async function extractAndExplain(kind: AnnotationKind, selection: LiveSelection): Promise<void> {
   const study = useStudyStore.getState()
 
-  const { annotation } = await AnnotationEngine.create({
+  const { annotation, anchor } = await AnnotationEngine.create({
     bookId: selection.bookId,
     documentId: selection.documentId,
     capture: selection.capture,
     kind,
   })
 
+  if (kind === 'highlight' || kind === 'underline') {
+    recordAnnotationCreated(annotation, anchor)
+  }
+
   // A plain highlight is a mark on the book, not a note about it.
-  if (kind !== 'highlight') {
+  if (kind !== 'highlight' && kind !== 'underline') {
     await ensureActiveNote(selection.bookId)
     const { shape, blockKind } = shapeFor(kind)
     useNotesStore.getState().requestInsert({

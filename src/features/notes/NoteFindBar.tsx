@@ -95,8 +95,9 @@ function countHits(editor: Editor, query: string): number {
   return total
 }
 
-export function NoteFindBar({ editor, onClose }: { editor: Editor; onClose: () => void }) {
+export function NoteFindBar({ editor, onClose, replace = false }: { editor: Editor; onClose: () => void; replace?: boolean }) {
   const [query, setQuery] = useState('')
+  const [replacement, setReplacement] = useState('')
   const [current, setCurrent] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -125,6 +126,37 @@ export function NoteFindBar({ editor, onClose }: { editor: Editor; onClose: () =
     setCurrent((c) => (c + delta + total) % total)
   }
 
+  const replaceCurrent = () => {
+    if (!query.trim() || total === 0) return
+    const { state } = editor
+    let hit = 0
+    let from = 0
+    let to = 0
+    const needle = normalize(query).text
+    state.doc.descendants((node, pos) => {
+      if (!node.isText || !node.text) return
+      const norm = normalize(node.text)
+      let searchFrom = 0
+      for (;;) {
+        const at = norm.text.indexOf(needle, searchFrom)
+        if (at === -1) break
+        if (hit === current) {
+          const rawStart = norm.map[at]
+          const rawEnd =
+            at + needle.length >= norm.map.length ? node.text.length : norm.map[at + needle.length]
+          from = pos + rawStart
+          to = pos + rawEnd
+          return false
+        }
+        hit += 1
+        searchFrom = at + 1
+      }
+    })
+    if (to > from) {
+      editor.chain().focus().insertContentAt({ from, to }, replacement).run()
+    }
+  }
+
   return (
     <div className="border-line bg-panel flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
       <Icon name="search" className="text-ink-faint h-3.5 w-3.5" />
@@ -144,6 +176,21 @@ export function NoteFindBar({ editor, onClose }: { editor: Editor; onClose: () =
         placeholder="Find in this note"
         className="text-ink placeholder:text-ink-faint flex-1 bg-transparent text-xs outline-none"
       />
+      {replace && (
+        <input
+          value={replacement}
+          onChange={(e) => setReplacement(e.target.value)}
+          placeholder="Replace with"
+          aria-label="Replace with"
+          className="text-ink placeholder:text-ink-faint w-40 bg-transparent text-xs outline-none"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              replaceCurrent()
+            }
+          }}
+        />
+      )}
       <span className="text-ink-faint text-[11px] tabular-nums">
         {total === 0 ? (query ? 'none' : '') : `${current + 1} / ${total}`}
       </span>
@@ -161,6 +208,11 @@ export function NoteFindBar({ editor, onClose }: { editor: Editor; onClose: () =
       >
         <Icon name="chevron-down" className="h-3.5 w-3.5" />
       </button>
+      {replace && (
+        <button type="button" className="ui-btn" onClick={replaceCurrent}>
+          Replace
+        </button>
+      )}
       <button
         onClick={onClose}
         aria-label="Close find"

@@ -51,6 +51,10 @@ declare module '@tiptap/core' {
       setBlockDirection: (dir: 'ltr' | 'rtl' | null) => ReturnType
       /** null restores the default (start) alignment. */
       setBlockAlign: (align: BlockAlign | null) => ReturnType
+      setLineHeight: (lineHeight: string | null) => ReturnType
+      setBlockIndent: (indent: number) => ReturnType
+      adjustBlockIndent: (delta: number) => ReturnType
+      setParagraphSpacing: (space: { before?: string | null; after?: string | null }) => ReturnType
     }
   }
 }
@@ -78,6 +82,26 @@ export const BlockDirection = Extension.create({
             parseHTML: (el) => el.getAttribute('data-align'),
             renderHTML: (attrs) => (attrs.textAlign ? { 'data-align': attrs.textAlign } : {}),
           },
+          lineHeight: {
+            default: null,
+            parseHTML: (el) => el.getAttribute('data-line-height'),
+            renderHTML: (attrs) => (attrs.lineHeight ? { 'data-line-height': String(attrs.lineHeight) } : {}),
+          },
+          indent: {
+            default: 0,
+            parseHTML: (el) => Number(el.getAttribute('data-indent') ?? 0) || 0,
+            renderHTML: (attrs) => (attrs.indent ? { 'data-indent': String(attrs.indent) } : {}),
+          },
+          spaceBefore: {
+            default: null,
+            parseHTML: (el) => el.getAttribute('data-space-before'),
+            renderHTML: (attrs) => (attrs.spaceBefore ? { 'data-space-before': String(attrs.spaceBefore) } : {}),
+          },
+          spaceAfter: {
+            default: null,
+            parseHTML: (el) => el.getAttribute('data-space-after'),
+            renderHTML: (attrs) => (attrs.spaceAfter ? { 'data-space-after': String(attrs.spaceAfter) } : {}),
+          },
         },
       },
     ]
@@ -104,6 +128,29 @@ export const BlockDirection = Extension.create({
       setBlockDirection: (dir) => applyToBlocks({ dir, dirLock: dir !== null }),
       // Alignment is deliberately independent — setting it never touches `dir`.
       setBlockAlign: (align) => applyToBlocks({ textAlign: align }),
+      setLineHeight: (lineHeight) => applyToBlocks({ lineHeight }),
+      setBlockIndent: (indent) => applyToBlocks({ indent: Math.max(0, Math.min(8, indent)) }),
+      adjustBlockIndent: (delta) => {
+        return ({ state, dispatch }) => {
+          const { from, to } = state.selection
+          const tr = state.tr
+          let changed = false
+          state.doc.nodesBetween(from, to, (node, pos) => {
+            if (!node.isTextblock || !('indent' in node.attrs)) return
+            const next = Math.max(0, Math.min(8, (Number(node.attrs.indent) || 0) + delta))
+            if (next !== node.attrs.indent) {
+              tr.setNodeAttribute(pos, 'indent', next)
+              changed = true
+            }
+          })
+          if (changed && dispatch) dispatch(tr)
+          return changed
+        }
+      },
+      setParagraphSpacing: (space) => applyToBlocks({
+        ...(space.before !== undefined ? { spaceBefore: space.before } : {}),
+        ...(space.after !== undefined ? { spaceAfter: space.after } : {}),
+      }),
     }
   },
 

@@ -17,6 +17,8 @@ import type {
   NoteDoc,
   NoteLink,
   OutlineNode,
+  OcrResult,
+  PageMark,
   PageRecord,
   QuoteRef,
   ReadingState,
@@ -57,6 +59,8 @@ export class HashiyahDB extends Dexie {
   libraryNodes!: Table<LibraryNode, string>
   libraryPages!: Table<LibraryPage, string>
   libraryBlocks!: Table<LibraryBlock, string>
+  pageMarks!: Table<PageMark, string>
+  ocrResults!: Table<OcrResult, string>
 
   constructor(name = 'hashiyah') {
     super(name)
@@ -127,6 +131,17 @@ export class HashiyahDB extends Dexie {
     this.version(4).stores({
       libraryPages: 'id, parentPageId, updatedAt',
       libraryBlocks: 'id, pageId, parentBlockId, [pageId+parentBlockId], libraryNodeId, order',
+    })
+
+    /**
+     * v5 — additive only. PDF workspace marks (typed notes, area highlights,
+     * freehand underlines) and a dedicated OCR cache. Existing `annotations`
+     * and `anchors` are left untouched so snips and source backlinks keep
+     * resolving.
+     */
+    this.version(5).stores({
+      pageMarks: 'id, documentId, bookId, [documentId+pageNumber], createdAt',
+      ocrResults: 'id, documentId, fingerprint, [documentId+pageNumber]',
     })
   }
 }

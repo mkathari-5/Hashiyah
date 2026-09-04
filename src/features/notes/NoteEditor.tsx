@@ -12,9 +12,11 @@ import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table
 import { emptyDoc, noteDocsRepo } from '@/db/repos/notes'
 import { BlockHandle } from '@/features/notes/BlockHandle'
 import { NoteFind, NoteFindBar } from '@/features/notes/NoteFindBar'
+import { NotesToolbar } from '@/features/notes/NotesToolbar'
 import { BlockId } from '@/features/notes/extensions/BlockId'
 import { BlockDirection } from '@/features/notes/extensions/BlockDirection'
 import { ImageBlock } from '@/features/notes/extensions/ImageBlock'
+import { Subscript, Superscript, TextStyleAttrs, Underline } from '@/features/notes/extensions/marks'
 import { QuranBlock, HadithBlock } from '@/features/notes/extensions/ScriptureBlocks'
 import { SemanticBlock } from '@/features/notes/extensions/SemanticBlock'
 import { SlashCommand } from '@/features/notes/extensions/SlashCommand'
@@ -22,11 +24,11 @@ import { SourceGroup } from '@/features/notes/extensions/SourceGroup'
 import { SourceQuote } from '@/features/notes/extensions/SourceQuote'
 import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/extensions/Toggle'
 import { WikiLink, handleWikiLinkClick } from '@/features/notes/extensions/WikiLink'
-import { FormatBar } from '@/features/notes/FormatBar'
 import {
   applyToggleStates,
   collectOutline,
   collectToggleStates,
+  countCharacters,
   countWords,
   saveNote,
   type OutlineEntry,
@@ -51,6 +53,7 @@ export const noteExtensions = [
     heading: { levels: [1, 2, 3] },
     // Shift+Enter creates the next Toggle when inside one; hard breaks use Mod-Enter.
     hardBreak: false,
+    underline: false,
   }),
   HardBreak.extend({
     addKeyboardShortcuts() {
@@ -62,6 +65,10 @@ export const noteExtensions = [
   Highlight.configure({ multicolor: true }),
   TextStyle,
   Color,
+  Underline,
+  Superscript,
+  Subscript,
+  TextStyleAttrs,
   TaskList,
   TaskItem.configure({ nested: true }),
   Table.configure({ resizable: true }),
@@ -126,7 +133,7 @@ export interface NoteEditorHandle {
 interface Props {
   noteId: string
   ref?: React.Ref<NoteEditorHandle>
-  onStats?: (stats: { words: number }) => void
+  onStats?: (stats: { words: number; characters: number }) => void
 }
 
 export function NoteEditor({ noteId, ref, onStats }: Props) {
@@ -149,6 +156,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
 
   const [loadedNoteId, setLoadedNoteId] = useState<string | null>(null)
   const [findOpen, setFindOpen] = useState(false)
+  const [findReplace, setFindReplace] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const noteIdRef = useRef(noteId)
   const dirtyRef = useRef(false)
@@ -216,7 +224,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
     const delay = isLesson ? LESSON_AUTOSAVE_MS : AUTOSAVE_MS
     const onUpdate = () => {
       dirtyRef.current = true
-      onStats?.({ words: countWords(editor.getJSON()) })
+      onStats?.({ words: countWords(editor.getJSON()), characters: countCharacters(editor.getJSON()) })
       window.clearTimeout(timerRef.current)
       timerRef.current = window.setTimeout(() => void flush(), delay)
     }
@@ -253,7 +261,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
       editor.commands.setContent(row?.doc ?? emptyDoc(), { emitUpdate: false })
       dirtyRef.current = false
       setLoadedNoteId(noteId)
-      onStats?.({ words: countWords(editor.getJSON()) })
+      onStats?.({ words: countWords(editor.getJSON()), characters: countCharacters(editor.getJSON()) })
     })()
     return () => {
       cancelled = true
@@ -408,7 +416,10 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
         el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       },
       collapseAll: (collapsed) => editor?.commands.setAllTogglesOpen(!collapsed),
-      openFind: () => setFindOpen(true),
+      openFind: () => {
+        setFindReplace(false)
+        setFindOpen(true)
+      },
       focus: () => editor?.view.focus(),
     }),
     [editor],
@@ -417,8 +428,30 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   if (!editor) return null
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      {findOpen && <NoteFindBar editor={editor} onClose={() => setFindOpen(false)} />}
+    <div className="relative flex h-full min-h-0 flex-col note-workspace">
+      {!revisionMode && (
+        <NotesToolbar
+          editor={editor}
+          onFind={() => {
+            setFindReplace(false)
+            setFindOpen(true)
+          }}
+          onReplace={() => {
+            setFindReplace(true)
+            setFindOpen(true)
+          }}
+        />
+      )}
+      {findOpen && (
+        <NoteFindBar
+          editor={editor}
+          replace={findReplace}
+          onClose={() => {
+            setFindOpen(false)
+            setFindReplace(false)
+          }}
+        />
+      )}
 
       {saveError && (
         <div className="bg-hl-rose/15 text-hl-rose border-hl-rose/30 border-b px-4 py-1.5 text-xs">
@@ -437,8 +470,6 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
         {/* The block grip is editing chrome, and revision is for reading. */}
         {!revisionMode && <BlockHandle editor={editor} scrollRef={scrollRef} />}
       </div>
-
-      <FormatBar editor={editor} />
     </div>
   )
 }

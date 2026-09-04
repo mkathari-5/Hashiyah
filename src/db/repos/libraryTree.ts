@@ -1,5 +1,6 @@
 import { db } from '@/db/db'
 import { newId } from '@/lib/id'
+import type { RichInlineDoc } from '@/lib/richTitle'
 import type { LibraryNode, LibraryNodeType } from '@/types'
 
 /**
@@ -14,6 +15,7 @@ export interface CreateNodeInput {
   parentId: string | null
   type: LibraryNodeType
   title: string
+  richTitle?: RichInlineDoc | null
   arabicTitle?: string
   bookId?: string | null
   noteId?: string | null
@@ -63,6 +65,7 @@ export const libraryRepo = {
       type: input.type,
       order: siblings.length,
       title: input.title,
+      richTitle: input.richTitle ?? null,
       arabicTitle: input.arabicTitle,
       bookId: input.bookId ?? null,
       noteId: input.noteId ?? null,

@@ -1,5 +1,8 @@
 import { useEffect } from 'react'
+import { deleteSelectedAnnotation } from '@/features/pdf/annotationActions'
+import { isTypingContext } from '@/features/shortcuts/typingContext'
 import { extractAndExplain, quickNoteAtCurrentPosition } from '@/services/notes/extract'
+import { redoMarkHistory, undoMarkHistory } from '@/services/annotations/history'
 import { useAppStore } from '@/state/useAppStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { AnnotationKind } from '@/types'
@@ -42,6 +45,9 @@ export const SHORTCUTS: ShortcutBinding[] = [
   { id: 'focusnotes', keys: 'Ctrl+Shift+E', description: 'Toggle notes full screen', group: 'Layout' },
   { id: 'theme', keys: 'Ctrl+Shift+M', description: 'Toggle dark / light theme', group: 'Layout' },
   { id: 'help', keys: 'Ctrl+/', description: 'Show keyboard shortcuts', group: 'Layout' },
+  { id: 'pdf-text', keys: 'T', description: 'PDF text annotation tool', group: 'PDF' },
+  { id: 'pdf-highlight', keys: 'H', description: 'PDF highlight tool', group: 'PDF' },
+  { id: 'pdf-underline', keys: 'U', description: 'PDF underline tool', group: 'PDF' },
 ]
 
 const EXTRACT_KEYS: { key: string; shift: boolean; kind: AnnotationKind }[] = [
@@ -65,10 +71,50 @@ export function useShortcuts() {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const mod = event.ctrlKey || event.metaKey
-      if (!mod) return
-
       const app = useAppStore.getState()
       const study = useStudyStore.getState()
+      const typing = isTypingContext(event.target)
+
+      if (!mod && !event.altKey && !typing) {
+        if (event.key === 'Escape') {
+          if (study.editingMarkId) {
+            study.setEditingMarkId(null)
+          }
+          study.setPdfTool('select')
+          study.setSelection(null)
+          study.setSelectedMarkId(null)
+          return
+        }
+        if ((event.key === 'Delete' || event.key === 'Backspace') && (study.selectedMarkId || study.activeAnnotationId)) {
+          event.preventDefault()
+          void deleteSelectedAnnotation()
+          return
+        }
+        if (event.key === 't' || event.key === 'T') {
+          event.preventDefault()
+          study.setPdfTool('text')
+          return
+        }
+        if (event.key === 'h' || event.key === 'H') {
+          event.preventDefault()
+          study.setPdfTool('highlight')
+          return
+        }
+        if (event.key === 'u' || event.key === 'U') {
+          event.preventDefault()
+          study.setPdfTool('underline')
+          return
+        }
+      }
+
+      if (mod && (event.key === 'z' || event.key === 'Z') && !typing) {
+        event.preventDefault()
+        if (event.shiftKey) void redoMarkHistory()
+        else void undoMarkHistory()
+        return
+      }
+
+      if (!mod) return
 
       // Palette / search / help work everywhere.
       if (!event.shiftKey && (event.key === 'k' || event.key === 'p')) {

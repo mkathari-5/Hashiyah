@@ -4,6 +4,12 @@ import { libraryBlocksRepo, libraryPagesRepo } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryBlockRow } from '@/features/library/LibraryBlockRow'
 import {
+  deleteLibraryBlock,
+  inspectBlockDeletion,
+  restoreBlockDeletion,
+  type DeleteImpact,
+} from '@/features/library/libraryDelete'
+import {
   blockById,
   canMergeWith,
   childrenOf,
@@ -21,7 +27,6 @@ import {
   parentIdFromTransientId,
   reconcileTransients,
   slashQueryFrom,
-  splitContent,
   stripSlashQuery,
   TRANSIENT_BLOCK_ID,
   transientIdFor,
@@ -30,7 +35,10 @@ import {
 } from '@/features/library/libraryPageModel'
 import { ensureLibraryPageReady } from '@/features/library/migrateLibraryPages'
 import { SlashCommandMenu } from '@/features/library/SlashCommandMenu'
+import { ConfirmDialog } from '@/features/shell/ConfirmDialog'
+import { ContextMenu } from '@/features/shell/ContextMenu'
 import { Icon } from '@/features/shell/Icon'
+import { concatRichDocs, plainFromRich, richFromPlain, splitRichDoc, type RichInlineDoc } from '@/lib/richTitle'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import type { LibraryBlock } from '@/types'
 
@@ -73,6 +81,10 @@ export function LibraryEditor({
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropId, setDropId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
+  const [richDrafts, setRichDrafts] = useState<Record<string, RichInlineDoc | null>>({})
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [confirm, setConfirm] = useState<DeleteImpact | null>(null)
+  const [undo, setUndo] = useState<{ label: string; restore: () => Promise<void> } | null>(null)
   const caretRef = useRef(0)
   const chain = useRef(Promise.resolve())
   const transientsRef = useRef<Record<string, LibraryBlock>>({})
@@ -101,6 +113,7 @@ export function LibraryEditor({
     omittedTransients.current = new Set()
     setTransients({})
     setDrafts({})
+    setRichDrafts({})
     setFocusId(null)
     setSlash(null)
   }, [pageId])
@@ -125,10 +138,12 @@ export function LibraryEditor({
 
   const blocks = useMemo(
     () =>
-      mergeVisible(stored ?? [], Object.values(transients)).map((block) =>
-        drafts[block.id] != null ? { ...block, content: drafts[block.id]! } : block,
-      ),
-    [stored, transients, drafts],
+      mergeVisible(stored ?? [], Object.values(transients)).map((block) => {
+        const content = drafts[block.id] != null ? drafts[block.id]! : block.content
+        const richContent = Object.hasOwn(richDrafts, block.id) ? richDrafts[block.id] : block.richContent
+        return { ...block, content, richContent }
+      }),
+    [stored, transients, drafts, richDrafts],
   )
 
   useEffect(() => {
@@ -195,6 +210,12 @@ export function LibraryEditor({
       delete next[id]
       return next
     })
+    setRichDrafts((current) => {
+      if (!Object.hasOwn(current, id)) return current
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
   }
 
   const persistTransient = async (block: LibraryBlock): Promise<LibraryBlock> => {
@@ -203,6 +224,7 @@ export function LibraryEditor({
       parentBlockId: block.parentBlockId,
       type: block.type,
       content: block.content,
+      richContent: block.richContent ?? null,
       order: block.order,
       expanded: block.expanded,
       checked: block.checked,
@@ -219,9 +241,10 @@ export function LibraryEditor({
     return persistTransient(block)
   }
 
-  const onChange = (id: string, content: string, caret: number) => {
+  const onChange = (id: string, content: string, caret: number, rich: RichInlineDoc | null) => {
     caretRef.current = caret
     setDrafts((current) => ({ ...current, [id]: content }))
+    setRichDrafts((current) => ({ ...current, [id]: rich }))
     const query = slashQueryFrom(content)
     if (query !== null) {
       const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/:/g, '\\:')
@@ -238,7 +261,7 @@ export function LibraryEditor({
       if (!current) return
 
       if (isTransientId(id)) {
-        const next = { ...current, content }
+        const next = { ...current, content, richContent: rich }
         if (!isPersistableBlock(next)) {
           putTransient(next)
           return
@@ -248,11 +271,15 @@ export function LibraryEditor({
           const { [id]: _omit, ...rest } = d
           return { ...rest, [created.id]: content }
         })
+        setRichDrafts((d) => {
+          const { [id]: _omit, ...rest } = d
+          return { ...rest, [created.id]: rich }
+        })
         setFocusId(created.id)
         return
       }
 
-      await libraryBlocksRepo.update(id, { content })
+      await libraryBlocksRepo.update(id, { content, richContent: rich })
     })
   }
 
@@ -354,7 +381,9 @@ export function LibraryEditor({
   }
 
   const enter = async (block: LibraryBlock, caret: number) => {
-    const { before, after } = splitContent(block.content, caret)
+    const split = splitRichDoc(block.richContent ?? richFromPlain(block.content), caret)
+    const before = plainFromRich(split.before)
+    const after = plainFromRich(split.after)
     const continueType = enterContinuationType(block.type)
     const snapshot = live()
     const kids = childrenOf(snapshot, block.id)
@@ -370,10 +399,10 @@ export function LibraryEditor({
 
     if (!before.trim() && after.trim()) {
       const liveBlock = isTransientId(block.id)
-        ? await ensurePersisted({ ...block, content: after })
+        ? await ensurePersisted({ ...block, content: after, richContent: split.after })
         : block
       if (isTransientId(liveBlock.id)) {
-        putTransient({ ...block, content: after })
+        putTransient({ ...block, content: after, richContent: split.after })
         return
       }
       const at = currentIndex < 0 ? 0 : currentIndex
@@ -385,14 +414,15 @@ export function LibraryEditor({
       return
     }
 
-    const liveBlock = await ensurePersisted({ ...block, content: before })
+    const liveBlock = await ensurePersisted({ ...block, content: before, richContent: split.before })
     if (isTransientId(liveBlock.id)) {
-      putTransient({ ...block, content: before })
+      putTransient({ ...block, content: before, richContent: split.before })
       return
     }
     if (block.content !== before) {
-      await libraryBlocksRepo.update(liveBlock.id, { content: before })
+      await libraryBlocksRepo.update(liveBlock.id, { content: before, richContent: split.before })
       setDrafts((d) => ({ ...d, [liveBlock.id]: before }))
+      setRichDrafts((d) => ({ ...d, [liveBlock.id]: split.before }))
     }
 
     if (!after.trim()) {
@@ -407,10 +437,12 @@ export function LibraryEditor({
       parentBlockId: liveBlock.parentBlockId,
       type: continueType,
       content: after,
+      richContent: split.after,
       order: insertAt,
       expanded: continueType === 'toggle' ? false : undefined,
     })
     setDrafts((d) => ({ ...d, [created.id]: after }))
+    setRichDrafts((d) => ({ ...d, [created.id]: split.after }))
     setFocusCaret('start')
     setFocusId(created.id)
   }
@@ -443,11 +475,12 @@ export function LibraryEditor({
     }
 
     if (prev && canMergeWith(prev, block)) {
-      const joined = `${prev.content}${block.content}`
+      const joinedRich = concatRichDocs(prev.richContent ?? richFromPlain(prev.content), block.richContent ?? richFromPlain(block.content))
+      const joined = plainFromRich(joinedRich)
       if (isTransientId(prev.id)) {
-        putTransient({ ...prev, content: joined })
+        putTransient({ ...prev, content: joined, richContent: joinedRich })
       } else {
-        await libraryBlocksRepo.update(prev.id, { content: joined })
+        await libraryBlocksRepo.update(prev.id, { content: joined, richContent: joinedRich })
       }
       await libraryBlocksRepo.remove(block.id)
       setFocusId(prev.id)
@@ -478,37 +511,42 @@ export function LibraryEditor({
     setFocusId(persisted.id)
   }
 
-  const onKeyDown = (id: string, event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const block = blockById(blocks, id) ?? transientsRef.current[id]
-    if (!block) return
+  const onKeyDown = (id: string, event: KeyboardEvent, caret: number, _empty: boolean, collapsed: boolean, plain?: string, rich?: RichInlineDoc | null): boolean => {
+    const found = blockById(blocks, id) ?? transientsRef.current[id]
+    if (!found) return false
+    const block = {
+      ...found,
+      content: plain ?? found.content,
+      richContent: rich ?? found.richContent,
+    }
 
     if (slash && slash.blockId === id) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         setSlash((s) => s && { ...s, index: slashItems.length ? (s.index + 1) % slashItems.length : 0 })
-        return
+        return true
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
         setSlash((s) =>
           s && { ...s, index: slashItems.length ? (s.index - 1 + slashItems.length) % slashItems.length : 0 },
         )
-        return
+        return true
       }
       if (event.key === 'Enter') {
         event.preventDefault()
         const item = slashItems[slash.index]
         if (item) void run(() => convertOrInsert(item))
-        return
+        return true
       }
       if (event.key === 'Escape') {
         event.preventDefault()
         setSlash(null)
-        return
+        return true
       }
       if (event.key === 'Tab') {
         event.preventDefault()
-        return
+        return true
       }
     }
 
@@ -522,57 +560,60 @@ export function LibraryEditor({
         const prev = at > 0 ? visible[at - 1] : block.parentBlockId
         if (prev) setFocusId(prev)
       }
-      return
+      return true
     }
 
     if (event.key === 'Tab') {
       event.preventDefault()
       void run(() => (event.shiftKey ? outdent(block) : indent(block)))
-      return
+      return true
     }
 
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      const caret = event.currentTarget.selectionStart ?? caretRef.current
       void run(() => enter(block, caret))
-      return
+      return true
     }
 
-    if (event.key === 'Backspace') {
-      const start = event.currentTarget.selectionStart ?? 0
-      const end = event.currentTarget.selectionEnd ?? 0
-      if (start === 0 && end === 0) {
-        event.preventDefault()
-        void run(() => backspaceStart(block, blocks))
-      }
-      return
+    if (event.key === 'Backspace' && caret === 0 && collapsed) {
+      event.preventDefault()
+      void run(() => backspaceStart(block, blocks))
+      return true
     }
 
-    if (event.key === 'ArrowUp' && (event.currentTarget.selectionStart ?? 0) === 0) {
+    if (event.key === 'ArrowUp' && caret === 0) {
       event.preventDefault()
       const visible = visibleBlockIds(blocks)
       const at = visible.indexOf(block.id)
       if (at > 0) setFocusId(visible[at - 1]!)
       else setFocusId('title')
-      return
+      return true
     }
 
-    if (
-      event.key === 'ArrowDown' &&
-      (event.currentTarget.selectionStart ?? 0) === event.currentTarget.value.length
-    ) {
+    if (event.key === 'ArrowDown' && caret === block.content.length) {
       event.preventDefault()
       const visible = visibleBlockIds(blocks)
       const at = visible.indexOf(block.id)
       if (at >= 0 && at < visible.length - 1) setFocusId(visible[at + 1]!)
+      return true
     }
+
+    return false
   }
 
   const onToggle = (id: string) => {
     void run(async () => {
       const block = blockById(live(), id)
       if (!block || block.type !== 'toggle') return
-      await libraryBlocksRepo.update(id, { expanded: !block.expanded })
+      const expanding = !block.expanded
+      await libraryBlocksRepo.update(id, { expanded: expanding })
+      if (expanding) {
+        const kids = childrenOf(await libraryBlocksRepo.forPage(pageId), id)
+        if (kids.length === 0) {
+          setFocusCaret('start')
+          setFocusId(transientIdFor(id))
+        }
+      }
     })
   }
 
@@ -609,7 +650,7 @@ export function LibraryEditor({
       if (slashRef.current?.blockId === id) return
       if (focusIdRef.current === id) return
       const active = document.activeElement as HTMLElement | null
-      if (active?.closest('.slash-menu, .page-editor-tail, .page-block-plus, .page-block-handle')) return
+      if (active?.closest('.slash-menu, .page-editor-tail, .page-block-plus, .page-block-handle, .title-format-bar, .node-menu, .confirm-layer')) return
       const safe = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id.replace(/:/g, '\\:')
       if (active?.closest(`[data-block-id="${safe}"]`)) return
       const block = transientsRef.current[id]
@@ -684,6 +725,10 @@ export function LibraryEditor({
               onOpenPage={(id) => onOpenPage?.(id)}
               onTodo={(id, checked) => void libraryBlocksRepo.update(id, { checked })}
               onInsert={onInsert}
+              onContextMenu={(id, event) => {
+                if (isTransientId(id)) return
+                setMenu({ id, x: event.clientX, y: event.clientY })
+              }}
               onDragStart={setDragId}
               onDragOver={(id, event) => {
                 if (!dragId || dragId === id) return
@@ -775,6 +820,79 @@ export function LibraryEditor({
           }
           onClose={() => setStudyPickFor(null)}
         />
+      )}
+
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label="Library row"
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              id: 'delete',
+              label: 'Delete',
+              danger: true,
+              onSelect: () => {
+                const id = menu.id
+                void inspectBlockDeletion(id).then((impact) => {
+                  if (!impact) return
+                  if (!impact.needsConfirm) {
+                    void run(async () => {
+                      const snapshot = await deleteLibraryBlock(id)
+                      if (!snapshot) return
+                      setFocusId(snapshot.selectAfter)
+                      setUndo({
+                        label: `Deleted “${impact.title}”`,
+                        restore: async () => {
+                          await restoreBlockDeletion(snapshot)
+                          setFocusId(id)
+                          setUndo(null)
+                        },
+                      })
+                    })
+                    return
+                  }
+                  setConfirm(impact)
+                })
+              },
+            },
+          ]}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Delete item"
+          body={`${confirm.summary} ${confirm.detail}`}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            const impact = confirm
+            setConfirm(null)
+            void run(async () => {
+              const snapshot = await deleteLibraryBlock(impact.id)
+              if (!snapshot) return
+              setFocusId(snapshot.selectAfter)
+              setUndo({
+                label: `Deleted “${impact.title}”`,
+                restore: async () => {
+                  await restoreBlockDeletion(snapshot)
+                  setFocusId(impact.id)
+                  setUndo(null)
+                },
+              })
+            })
+          }}
+        />
+      )}
+
+      {undo && (
+        <div className="undo-toast" role="status">
+          <span>{undo.label}</span>
+          <button type="button" onClick={() => void undo.restore()}>
+            Undo
+          </button>
+        </div>
       )}
     </div>
   )

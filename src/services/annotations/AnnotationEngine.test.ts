@@ -217,4 +217,18 @@ describe('AnnotationEngine', () => {
     expect(resolved).toHaveLength(2)
     expect(resolved.every((r) => r.resolution.confidence === 1)).toBe(true)
   })
+
+  it('stores an underline on the book without touching notes', async () => {
+    const { annotation, anchor } = await AnnotationEngine.create({
+      bookId: BOOK,
+      documentId: DOC,
+      capture: captureAt(0),
+      kind: 'underline',
+    })
+    expect(annotation.kind).toBe('underline')
+    expect(anchor.rects).toHaveLength(1)
+    const resolved = await AnnotationEngine.resolve(annotation.id)
+    expect(resolved?.resolution.strategy).toBe('exact')
+    expect(await notesRepo.forBook(BOOK)).toHaveLength(0)
+  })
 })

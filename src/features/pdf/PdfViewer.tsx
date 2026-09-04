@@ -2,20 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useLiveQuery } from 'dexie-react-hooks'
 import { booksRepo } from '@/db/repos/library'
 import { anchorsRepo } from '@/db/repos/annotations'
-import { pagesRepo } from '@/db/repos/documents'
+import { pageMarksRepo } from '@/db/repos/pageMarks'
+import { AnnotationToolbar } from '@/features/pdf/AnnotationToolbar'
+import { PageMarkLayer } from '@/features/pdf/PageMarkLayer'
 import { PdfPage, type PageContextRegistry } from '@/features/pdf/PdfPage'
 import { SelectionMenu } from '@/features/pdf/SelectionMenu'
 import { SnipOverlay } from '@/features/pdf/SnipOverlay'
 import { usePdfDocument } from '@/features/pdf/usePdfDocument'
-import { isImageOnlyPage, ocrPdfPage } from '@/services/ocr/OcrService'
+import { OcrScheduler } from '@/services/ocr/OcrScheduler'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { PageTextContext } from '@/services/annotations/selection'
 import { Icon } from '@/features/shell/Icon'
 import { displayTitle, secondaryTitle } from '@/lib/bookTitle'
-import type { PDFDocumentProxy } from '@/services/pdf/pdfjs'
+import type { PageRotation } from '@/services/pdf/pageCoords'
 
 const GAP = 20
 const HORIZONTAL_PADDING = 48
+const GUTTER = 220
 const OVERSCAN = 1
 const MIN_ZOOM = 0.4
 const MAX_ZOOM = 4
@@ -32,15 +35,25 @@ export function PdfViewer() {
   const clearRestoredScroll = useStudyStore((s) => s.clearRestoredScroll)
   const persistPosition = useStudyStore((s) => s.persistPosition)
   const jumpRequest = useStudyStore((s) => s.jumpRequest)
-  const setSelection = useStudyStore((s) => s.setSelection)
   const snipMode = useStudyStore((s) => s.snipMode)
   const setSnipMode = useStudyStore((s) => s.setSnipMode)
+  const pdfTool = useStudyStore((s) => s.pdfTool)
+  const pageRotation = useStudyStore((s) => s.pageRotation)
+  const ocrLanguage = useStudyStore((s) => s.ocrLanguage)
 
   const { handle, loading, error } = usePdfDocument(documentId)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const schedulerRef = useRef<OcrScheduler | null>(null)
+  const panRef = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
   const [containerWidth, setContainerWidth] = useState(0)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
+  const [ocrStatus, setOcrStatus] = useState({
+    pageNumber: null as number | null,
+    progress: 0,
+    status: 'idle',
+    error: null as string | null,
+  })
 
   const book = useLiveQuery(() => (bookId ? booksRepo.get(bookId) : undefined), [bookId])
 
@@ -78,9 +91,16 @@ export function PdfViewer() {
 
   const fitWidth = Math.max(120, containerWidth - HORIZONTAL_PADDING)
   const pageWidth = Math.round(fitWidth * zoom)
-  const pageHeight = handle ? Math.round(pageWidth * handle.aspect) : 0
+  const rotatedAspect = handle
+    ? pageRotation === 90 || pageRotation === 270
+      ? 1 / handle.aspect
+      : handle.aspect
+    : 1
+  const pageHeight = handle ? Math.round(pageWidth * rotatedAspect) : 0
   const slot = pageHeight + GAP
   const pageCount = handle?.pageCount ?? 0
+  const workspaceWidth = Math.max(containerWidth, pageWidth + GUTTER * 2)
+  const pageLeft = (workspaceWidth - pageWidth) / 2
 
   // ── Windowing ─────────────────────────────────────────────────────────────
   const [first, last] = useMemo(() => {
@@ -95,6 +115,38 @@ export function PdfViewer() {
     for (let n = first; n <= last; n++) out.push(n)
     return out
   }, [first, last])
+
+  useEffect(() => {
+    if (!handle || !documentId) {
+      schedulerRef.current = null
+      return
+    }
+    const scheduler = new OcrScheduler(() => handle.pdf, documentId)
+    scheduler.setLanguage(useStudyStore.getState().ocrLanguage)
+    schedulerRef.current = scheduler
+    const unsub = scheduler.subscribe((state) =>
+      setOcrStatus({
+        pageNumber: state.pageNumber,
+        progress: state.progress,
+        status: state.status,
+        error: state.error,
+      }),
+    )
+    return () => {
+      unsub()
+      scheduler.cancel()
+      if (schedulerRef.current === scheduler) schedulerRef.current = null
+    }
+  }, [handle, documentId])
+
+  useEffect(() => {
+    schedulerRef.current?.setLanguage(ocrLanguage)
+  }, [ocrLanguage])
+
+  useEffect(() => {
+    if (!visiblePages.length) return
+    schedulerRef.current?.prioritize(visiblePages)
+  }, [visiblePages, documentId])
 
   // ── Scroll tracking, current page and position persistence ────────────────
   const persistTimer = useRef<number | undefined>(undefined)
@@ -187,10 +239,16 @@ export function PdfViewer() {
     if (!jumpRequest || !slot) return
     void (async () => {
       const anchor = await anchorsRepo.forAnnotation(jumpRequest.annotationId)
-      if (!anchor) return
-      const y = anchor.rects[0]?.y ?? 0
-      setPage(anchor.pageNumber)
-      scrollToPage(anchor.pageNumber, y)
+      if (anchor) {
+        const y = anchor.rects[0]?.y ?? 0
+        setPage(anchor.pageNumber)
+        scrollToPage(anchor.pageNumber, y)
+        return
+      }
+      const mark = await pageMarksRepo.get(jumpRequest.annotationId)
+      if (!mark) return
+      setPage(mark.pageNumber)
+      scrollToPage(mark.pageNumber, Math.max(0, Math.min(1, mark.rect.y)))
     })()
   }, [jumpRequest, slot, scrollToPage, setPage])
 
@@ -199,7 +257,9 @@ export function PdfViewer() {
     (event: React.KeyboardEvent) => {
       const el = scrollRef.current
       if (!el) return
-      if (event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey)) {
+      const tag = (event.target as HTMLElement | null)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey && pdfTool !== 'pan')) {
         event.preventDefault()
         el.scrollBy({ top: el.clientHeight * 0.9, behavior: 'smooth' })
       } else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) {
@@ -213,8 +273,31 @@ export function PdfViewer() {
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
       }
     },
-    [],
+    [pdfTool],
   )
+
+  const onCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget || pdfTool === 'pan') {
+      useStudyStore.getState().setSelection(null)
+    }
+    if (pdfTool !== 'pan' || useStudyStore.getState().annotationGesture) return
+    const el = scrollRef.current
+    if (!el) return
+    panRef.current = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current || pdfTool !== 'pan' || useStudyStore.getState().annotationGesture) return
+    const el = scrollRef.current
+    if (!el) return
+    el.scrollLeft = panRef.current.left - (event.clientX - panRef.current.x)
+    el.scrollTop = panRef.current.top - (event.clientY - panRef.current.y)
+  }
+
+  const onCanvasPointerUp = () => {
+    panRef.current = null
+  }
 
   if (!bookId) return <EmptyReader />
   if (loading) return <ReaderMessage>Opening…</ReaderMessage>
@@ -239,36 +322,64 @@ export function PdfViewer() {
         snipActive={snipMode !== null}
       />
 
-      {documentId && (
-        <OcrBanner pdf={handle.pdf} documentId={documentId} pageNumber={currentPage} />
-      )}
+      <AnnotationToolbar
+        ocrStatus={ocrStatus}
+        onRetryOcr={() => schedulerRef.current?.retry(currentPage)}
+        onCancelOcr={() => schedulerRef.current?.cancel()}
+      />
 
       <div
         ref={scrollRef}
         onScroll={onScroll}
         onKeyDown={onKeyDown}
         tabIndex={0}
-        // §50 — the page floats on a slightly deeper surface than the chrome,
-        // which is what gives the book physical presence.
-        className="pdf-canvas relative flex-1 overflow-y-auto overflow-x-hidden outline-none"
-        onPointerDown={() => setSelection(null)}
+        className={`pdf-canvas relative flex-1 overflow-auto outline-none${pdfTool === 'pan' ? ' is-panning' : ''}`}
+        onPointerDown={onCanvasPointerDown}
+        onPointerMove={onCanvasPointerMove}
+        onPointerUp={onCanvasPointerUp}
       >
-        <div style={{ height: pageCount * slot + GAP, position: 'relative' }}>
+        <div style={{ height: pageCount * slot + GAP, width: workspaceWidth, position: 'relative' }}>
           {visiblePages.map((n) => (
             <div
               key={n}
-              style={{ position: 'absolute', top: (n - 1) * slot + GAP, left: 0, right: 0 }}
+              className="pdf-page-slot"
+              style={{
+                position: 'absolute',
+                top: (n - 1) * slot + GAP,
+                left: 0,
+                width: workspaceWidth,
+                height: pageHeight,
+              }}
             >
-              <PdfPage
-                pdf={handle.pdf}
+              <PageMarkLayer
                 documentId={documentId!}
                 bookId={bookId}
                 pageNumber={n}
-                width={pageWidth}
-                aspect={handle.aspect}
-                visible
-                registry={registry}
+                pageWidth={pageWidth}
+                pageHeight={pageHeight}
+                pageLeft={pageLeft}
+                rotation={pageRotation as PageRotation}
+                pdfPageWidth={handle.baseWidth}
+                pdfPageHeight={handle.baseHeight}
               />
+              <div
+                className="pdf-page-stage"
+                style={{ position: 'absolute', left: pageLeft, top: 0, width: pageWidth, height: pageHeight }}
+              >
+                <PdfPage
+                  pdf={handle.pdf}
+                  documentId={documentId!}
+                  bookId={bookId}
+                  pageNumber={n}
+                  width={pageWidth}
+                  aspect={rotatedAspect}
+                  visible
+                  registry={registry}
+                  rotation={pageRotation as PageRotation}
+                  pdfPageWidth={handle.baseWidth}
+                  pdfPageHeight={handle.baseHeight}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -368,7 +479,7 @@ function Toolbar({
         <button
           onClick={onFitWidth}
           title="Fit width"
-          className="hover:bg-hover text-ink-muted h-7 min-w-12 rounded px-1 text-xs tabular-nums"
+          className="ui-btn tabular min-w-12 px-1 text-xs"
         >
           {Math.round(zoom * 100)}%
         </button>
@@ -387,8 +498,8 @@ function Toolbar({
           title="Snip a region into your notes"
           aria-label="Snip a region into your notes"
           aria-pressed={snipActive}
-          className={`grid h-7 w-7 place-items-center rounded ${
-            snipActive ? 'bg-accent-soft text-accent' : 'text-ink-muted hover:bg-hover hover:text-ink'
+          className={`ui-btn ui-btn-icon ${
+            snipActive ? 'is-selected' : ''
           }`}
         >
           <Icon name="snip" />
@@ -397,7 +508,7 @@ function Toolbar({
           onClick={() => onSnip('explain')}
           title="Snip a region and start an explanation"
           aria-label="Snip a region and start an explanation"
-          className="hover:bg-hover text-ink-muted hover:text-ink grid h-7 w-7 place-items-center rounded"
+          className="ui-btn ui-btn-icon"
         >
           <Icon name="snip-explain" />
         </button>
@@ -423,57 +534,10 @@ function IconButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="hover:bg-hover text-ink-muted hover:text-ink grid h-7 w-7 place-items-center rounded disabled:opacity-30 disabled:hover:bg-transparent"
+      className="ui-btn ui-btn-icon disabled:opacity-30"
     >
       {children}
     </button>
-  )
-}
-
-/** Quiet on-demand OCR entry for genuinely image-only pages (§G1C). */
-function OcrBanner({
-  pdf,
-  documentId,
-  pageNumber,
-}: {
-  pdf: PDFDocumentProxy
-  documentId: string
-  pageNumber: number
-}) {
-  const page = useLiveQuery(() => pagesRepo.get(documentId, pageNumber), [documentId, pageNumber])
-  const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const [error, setError] = useState<string | null>(null)
-
-  if (!isImageOnlyPage(page)) return null
-  if (page?.textSource === 'ocr' && page.hasTextLayer) return null
-
-  return (
-    <div className="ocr-banner">
-      <span className="ocr-banner-label">Image-only page</span>
-      <span className="ocr-banner-hint">
-        {busy
-          ? `Recognising text… ${Math.round(progress * 100)}%`
-          : 'No selectable text layer — run OCR on this page.'}
-      </span>
-      <button
-        type="button"
-        disabled={busy}
-        className="ocr-banner-action"
-        onClick={() => {
-          setBusy(true)
-          setError(null)
-          void ocrPdfPage(pdf, documentId, pageNumber, (p) => setProgress(p.progress))
-            .catch((err: unknown) => {
-              setError(err instanceof Error ? err.message : 'OCR failed')
-            })
-            .finally(() => setBusy(false))
-        }}
-      >
-        {busy ? 'Working…' : 'Recognise text'}
-      </button>
-      {error && <span className="ocr-banner-error">{error}</span>}
-    </div>
   )
 }
 

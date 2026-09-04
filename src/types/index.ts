@@ -66,7 +66,13 @@ export interface LibraryNode {
   parentId: string | null
   type: LibraryNodeType
   order: number
+  /** Canonical searchable title. Always kept in sync with `richTitle`. */
   title: string
+  /**
+   * Optional inline formatting for `title`. Missing on older rows; those
+   * continue to render `title` as plain text.
+   */
+  richTitle?: import('@/lib/richTitle').RichInlineDoc | null
   arabicTitle?: string
 
   /**
@@ -132,7 +138,13 @@ export interface LibraryBlock {
   /** null = a top-level block on the page. */
   parentBlockId: string | null
   type: LibraryBlockType
+  /** Canonical searchable text. Always kept in sync with `richContent`. */
   content: string
+  /**
+   * Optional inline formatting for `content`. Missing on older rows; those
+   * continue to render `content` as plain text.
+   */
+  richContent?: import('@/lib/richTitle').RichInlineDoc | null
   order: number
   /** Toggle open/closed. Ignored for every other type. */
   expanded: boolean
@@ -198,6 +210,38 @@ export interface PageRecord {
    * is `ocr` so a selectable overlay can be rebuilt without re-running OCR.
    */
   ocrWords?: OcrWordBox[]
+  /** Language pack used when `textSource` is `ocr`. */
+  ocrLanguage?: OcrLanguage
+  ocrEngine?: string
+  ocrModelVersion?: string
+  ocrConfidence?: number
+  ocrDirection?: 'rtl' | 'ltr' | 'mixed'
+}
+
+export type OcrLanguage = 'ara' | 'eng' | 'ara+eng' | 'auto'
+
+export interface OcrLine {
+  text: string
+  words: OcrWordBox[]
+  confidence: number
+  direction: 'rtl' | 'ltr'
+}
+
+/** Cached OCR payload, keyed independently of the pages table. */
+export interface OcrResult {
+  id: string
+  documentId: string
+  fingerprint: string
+  pageNumber: number
+  language: OcrLanguage
+  engine: string
+  modelVersion: string
+  text: string
+  words: OcrWordBox[]
+  lines: OcrLine[]
+  confidence: number
+  direction: 'rtl' | 'ltr' | 'mixed'
+  createdAt: number
 }
 
 export interface OutlineNode {
@@ -226,6 +270,8 @@ export const ANNOTATION_KINDS = [
   'important',
   /** A snipped page region rather than a text selection (§D12). */
   'capture',
+  /** Text-layer underline; geometry lives on the existing anchor. */
+  'underline',
 ] as const
 
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
@@ -280,6 +326,50 @@ export interface AnnotationAnchor {
   pageHeight: number
   pageRotation: number
   anchorVersion: number
+}
+
+/**
+ * Marks drawn in the PDF annotation workspace (typed notes, area highlights,
+ * freehand underlines). These sit beside `annotations`/`anchors` so existing
+ * source quotes, snips and highlights never have to change shape.
+ */
+export type PageMarkKind = 'text' | 'margin' | 'area' | 'line'
+
+export type TextDirectionMode = 'auto' | 'rtl' | 'ltr'
+export type TextAlign = 'start' | 'center' | 'end'
+
+export interface PageMarkStyle {
+  fontSize: number
+  color: string
+  direction: TextDirectionMode
+  align: TextAlign
+  fillColor?: string
+  fillOpacity?: number
+  strokeColor?: string
+  strokeWidth?: number
+}
+
+export interface PageMark {
+  id: string
+  bookId: string
+  documentId: string
+  pageNumber: number
+  kind: PageMarkKind
+  /**
+   * Geometry in unrotated PDF page space, origin top-left, normalised to the
+   * original page box. Values may fall outside 0..1 for margin notes.
+   */
+  rect: NormalizedRect
+  content: string
+  style: PageMarkStyle
+  /** Rotation of the page box this geometry was measured against. */
+  pageRotation: number
+  pageWidth: number
+  pageHeight: number
+  /** Optional source quote / OCR span this margin note is pinned to. */
+  annotationId?: string | null
+  createdAt: number
+  updatedAt: number
 }
 
 export type AnchorStrategy =

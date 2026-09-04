@@ -2,7 +2,15 @@ import { useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { noteDocsRepo } from '@/db/repos/notes'
+import {
+  deleteLibraryNode,
+  inspectNodeDeletion,
+  restoreNodeDeletion,
+  type DeleteImpact,
+} from '@/features/library/libraryDelete'
 import { LibraryTree } from '@/features/library/LibraryTree'
+import { ConfirmDialog } from '@/features/shell/ConfirmDialog'
+import { ContextMenu } from '@/features/shell/ContextMenu'
 import { Icon } from '@/features/shell/Icon'
 import { navigationOutline } from '@/services/notes/NotesService'
 import { useLibraryStore } from '@/state/useLibraryStore'
@@ -10,26 +18,15 @@ import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { LibraryNode } from '@/types'
 
-/**
- * The compact library while studying (§E4).
- *
- * Navigation for opening existing study material. The Library home page is a
- * separate block editor — this sidebar is not that editor.
- */
 export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   const showLibrary = useLibraryStore((s) => s.showLibrary)
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
   const requestScrollTo = useNotesStore((s) => s.requestScrollTo)
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<{ id: string; arabic?: boolean } | null>(null)
+  const [confirm, setConfirm] = useState<DeleteImpact | null>(null)
+  const [undo, setUndo] = useState<{ label: string; restore: () => Promise<void> } | null>(null)
 
-  /**
-   * The active chapter's outline, read from its saved document.
-   *
-   * Driven by the note's persisted doc rather than by editor keystrokes, so the
-   * sidebar updates when a save lands (every ~400 ms of idle) instead of on
-   * every character — ordinary typing must not re-render the library.
-   */
   const outlineRaw = useLiveQuery(
     async () => {
       if (!activeNoteId) return []
@@ -40,10 +37,21 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
     [],
   )
 
-  // Stabilise the reference so the tree only re-renders when the *outline*
-  // actually changes, not merely because a save produced a new object.
   const outlineKey = JSON.stringify(outlineRaw)
   const outline = useMemo(() => outlineRaw, [outlineKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const runDelete = async (impact: DeleteImpact) => {
+    const snapshot = await deleteLibraryNode(impact.id)
+    if (!snapshot) return
+    setUndo({
+      label: `Deleted “${impact.title}”`,
+      restore: async () => {
+        await restoreNodeDeletion(snapshot)
+        if (snapshot.selectAfter) await useLibraryStore.getState().openNode(snapshot.selectAfter)
+        setUndo(null)
+      },
+    })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -78,60 +86,68 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
       </div>
 
       {menu && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} />
-          <div
-            className="node-menu"
-            style={{ left: Math.min(menu.x, window.innerWidth - 220), top: menu.y }}
-          >
-            <button
-              className="block-menu-item"
-              onClick={() => {
-                setRenameRequest({ id: menu.node.id, arabic: false })
-                setMenu(null)
-              }}
-            >
-              <Icon name="pencil" className="block-menu-icon" />
-              <span className="flex-1">Rename</span>
-            </button>
-            <button
-              className="block-menu-item"
-              onClick={() => {
-                setRenameRequest({ id: menu.node.id, arabic: true })
-                setMenu(null)
-              }}
-            >
-              <span className="block-menu-icon font-arabic">ع</span>
-              <span className="flex-1">Arabic title</span>
-            </button>
-            <button
-              className="block-menu-item"
-              onClick={async () => {
-                await libraryRepo.update(menu.node.id, { favorite: !menu.node.favorite })
-                setMenu(null)
-              }}
-            >
-              <Icon name="star" className="block-menu-icon" />
-              <span className="flex-1">{menu.node.favorite ? 'Remove favourite' : 'Favourite'}</span>
-            </button>
-            <div className="block-menu-sep" />
-            <button
-              className="block-menu-item is-danger"
-              onClick={async () => {
-                const kids = await libraryRepo.descendants(menu.node.id)
-                const message =
-                  kids.length > 0
-                    ? `Delete “${menu.node.title || 'Untitled'}” and ${kids.length} item${kids.length === 1 ? '' : 's'} inside it?\n\nTheir notes will be deleted. The PDF itself is kept.`
-                    : `Delete “${menu.node.title || 'Untitled'}”?\n\nIts notes will be deleted. The PDF itself is kept.`
-                if (window.confirm(message)) await libraryRepo.remove(menu.node.id)
-                setMenu(null)
-              }}
-            >
-              <Icon name="trash" className="block-menu-icon" />
-              <span className="flex-1">Delete</span>
-            </button>
-          </div>
-        </>
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          label={`Actions for ${menu.node.title || 'item'}`}
+          onClose={() => setMenu(null)}
+          items={[
+            {
+              id: 'rename',
+              label: 'Rename',
+              onSelect: () => setRenameRequest({ id: menu.node.id, arabic: false }),
+            },
+            {
+              id: 'arabic',
+              label: 'Arabic title',
+              onSelect: () => setRenameRequest({ id: menu.node.id, arabic: true }),
+            },
+            {
+              id: 'favourite',
+              label: menu.node.favorite ? 'Remove favourite' : 'Favourite',
+              onSelect: () => {
+                void libraryRepo.update(menu.node.id, { favorite: !menu.node.favorite })
+              },
+            },
+            {
+              id: 'delete',
+              label: 'Delete',
+              danger: true,
+              onSelect: () => {
+                void inspectNodeDeletion(menu.node.id).then((impact) => {
+                  if (!impact) return
+                  if (!impact.needsConfirm) {
+                    void runDelete(impact)
+                    return
+                  }
+                  setConfirm(impact)
+                })
+              },
+            },
+          ]}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title="Delete item"
+          body={`${confirm.summary} ${confirm.detail}`}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            const impact = confirm
+            setConfirm(null)
+            void runDelete(impact)
+          }}
+        />
+      )}
+
+      {undo && (
+        <div className="undo-toast" role="status">
+          <span>{undo.label}</span>
+          <button type="button" onClick={() => void undo.restore()}>
+            Undo
+          </button>
+        </div>
       )}
     </div>
   )

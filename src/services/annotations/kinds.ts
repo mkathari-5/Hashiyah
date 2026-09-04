@@ -65,6 +65,7 @@ export const KIND_META: Record<AnnotationKind, KindMeta> = {
   },
   important: { kind: 'important', label: 'Important', color: 'rose', block: 'important' },
   capture: { kind: 'capture', label: 'Captured region', color: 'neutral', block: null },
+  underline: { kind: 'underline', label: 'Underline', color: 'amber', block: null },
 }
 
 /** Menu order. Most-used first — this is the §71 requirement. */

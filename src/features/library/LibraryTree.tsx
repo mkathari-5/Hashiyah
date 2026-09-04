@@ -9,9 +9,12 @@ import {
   previousSibling,
 } from '@/features/library/libraryOutline'
 import { isLegacyEmptyTitle } from '@/features/library/legacyEmptyNodes'
+import { RichTitleView } from '@/features/library/RichTitleView'
+import { TitleInlineEditor } from '@/features/library/TitleInlineEditor'
 import { Icon, type IconName } from '@/features/shell/Icon'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import type { OutlineEntry } from '@/services/notes/NotesService'
+import type { RichInlineDoc } from '@/lib/richTitle'
 import type { LibraryNode, LibraryNodeType } from '@/types'
 
 /**
@@ -35,7 +38,7 @@ export function NodeTitle({
   node,
   className = '',
 }: {
-  node: Pick<LibraryNode, 'title' | 'arabicTitle' | 'type'>
+  node: Pick<LibraryNode, 'title' | 'arabicTitle' | 'type' | 'richTitle'>
   className?: string
 }) {
   const hasBoth = !!node.title && !!node.arabicTitle
@@ -46,7 +49,11 @@ export function NodeTitle({
   const recover = isLegacyEmptyTitle(node)
   return (
     <span className={`lib-title ${className}`}>
-      {displayTitle && <bdi className="lib-title-latin">{displayTitle}</bdi>}
+      {displayTitle && (
+        <bdi className="lib-title-latin">
+          <RichTitleView plain={displayTitle} rich={node.richTitle} />
+        </bdi>
+      )}
       {recover && (
         <span className="lib-title-recover" aria-label="Empty title" />
       )}
@@ -72,6 +79,7 @@ interface DraftSession {
   afterId: string | null
   type: LibraryNodeType
   text: string
+  rich: RichInlineDoc | null
 }
 
 /** In-place rename of an existing node. */
@@ -80,7 +88,8 @@ interface RenameSession {
   nodeId: string
   arabic: boolean
   text: string
-  snapshot: { title: string; arabicTitle?: string }
+  rich: RichInlineDoc | null
+  snapshot: { title: string; arabicTitle?: string; richTitle?: RichInlineDoc | null }
 }
 
 type EditSession = DraftSession | RenameSession
@@ -160,7 +169,8 @@ export function LibraryTree({
       nodeId: node.id,
       arabic,
       text: arabic ? (node.arabicTitle ?? '') : node.title,
-      snapshot: { title: node.title, arabicTitle: node.arabicTitle },
+      rich: arabic ? null : (node.richTitle ?? null),
+      snapshot: { title: node.title, arabicTitle: node.arabicTitle, richTitle: node.richTitle ?? null },
     }
     sessionRef.current = next
     setSession(next)
@@ -189,6 +199,7 @@ export function LibraryTree({
       afterId,
       type,
       text: '',
+      rich: null,
     }
     sessionRef.current = next
     setSession(next)
@@ -237,10 +248,10 @@ export function LibraryTree({
     }
   }, [])
 
-  const updateSessionText = (text: string) => {
+  const updateSessionText = (text: string, rich: RichInlineDoc | null = null) => {
     const prev = sessionRef.current
     if (!prev) return
-    const next = { ...prev, text }
+    const next = { ...prev, text, rich: prev.kind === 'rename' && prev.arabic ? prev.rich : rich }
     sessionRef.current = next
     setSession(next)
   }
@@ -265,6 +276,7 @@ export function LibraryTree({
       parentId: draft.parentId,
       type: draft.type,
       title: trimmed,
+      richTitle: draft.rich,
     })
     const index = Math.max(0, afterIndex + 1)
     await libraryRepo.move(node.id, draft.parentId, index)
@@ -373,6 +385,7 @@ export function LibraryTree({
             afterId: draft.afterId,
             type: draft.type,
             text: '',
+            rich: null,
           }
           sessionRef.current = pending
           setSession(pending)
@@ -392,6 +405,7 @@ export function LibraryTree({
             type: draft.type,
             text:
               latest?.kind === 'draft' && latest.parentId === parentId ? latest.text : '',
+            rich: latest?.kind === 'draft' && latest.parentId === parentId ? latest.rich : null,
           }
           sessionRef.current = next
           setSession(next)
@@ -409,6 +423,7 @@ export function LibraryTree({
         await libraryRepo.update(node.id, {
           title: current.snapshot.title,
           arabicTitle: current.snapshot.arabicTitle,
+          richTitle: current.snapshot.richTitle ?? null,
         })
         clearSession()
         return
@@ -426,7 +441,7 @@ export function LibraryTree({
         return
       }
 
-      await libraryRepo.update(node.id, { title: value })
+      await libraryRepo.update(node.id, { title: value, richTitle: current.rich })
 
       if (opts.nextSibling && node.parentId) {
         const parent = await libraryRepo.get(node.parentId)
@@ -440,6 +455,7 @@ export function LibraryTree({
             type,
             text:
               latest?.kind === 'draft' && latest.parentId === parent.id ? latest.text : '',
+            rich: latest?.kind === 'draft' && latest.parentId === parent.id ? latest.rich : null,
           }
           sessionRef.current = next
           setSession(next)
@@ -477,7 +493,7 @@ export function LibraryTree({
       if (current.arabic) {
         await libraryRepo.update(current.nodeId, { arabicTitle: value || undefined })
       } else if (value) {
-        await libraryRepo.update(current.nodeId, { title: value })
+        await libraryRepo.update(current.nodeId, { title: value, richTitle: current.rich })
       }
       const fresh = await libraryRepo.get(current.nodeId)
       if (fresh) {
@@ -514,11 +530,13 @@ export function LibraryTree({
   const renderEditor = (opts: {
     depth: number
     text: string
+    rich?: RichInlineDoc | null
     arabic: boolean
-    onChange: (value: string) => void
+    onChange: (value: string, rich?: RichInlineDoc | null) => void
     expanded?: boolean
     rowType: LibraryNodeType
     draft?: boolean
+    editorKey: string
   }) => (
     <div
       className={`lib-row is-editing lib-row-${opts.rowType}${opts.draft ? ' is-draft' : ''}`}
@@ -528,54 +546,79 @@ export function LibraryTree({
       <span className="lib-caret" aria-hidden>
         <Icon name="chevron-right" className={`lib-caret-icon${opts.expanded ? ' is-expanded' : ''}`} />
       </span>
-      <span className="lib-label">
-        <input
-          ref={inputRef}
-          className={`lib-title-input ${opts.arabic ? 'font-arabic' : ''}`}
-          dir={opts.arabic ? 'rtl' : 'auto'}
-          value={opts.text}
-          placeholder=""
-          aria-label={opts.arabic ? 'Arabic title' : 'Title'}
-          onChange={(e) => opts.onChange(e.target.value)}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            e.stopPropagation()
-            const rawText = (e.currentTarget as HTMLInputElement).value
-            if (e.key === 'Enter') {
-              e.preventDefault()
-              ignoreBlur.current = true
-              void commitSession({
-                nextSibling: !opts.arabic,
-                cancel: false,
-                rawText,
-              })
-            } else if (e.key === 'Escape') {
-              e.preventDefault()
-              ignoreBlur.current = true
-              void commitSession({ nextSibling: false, cancel: true, rawText })
-            } else if (e.key === 'Tab') {
-              e.preventDefault()
-              void handleTab(e.shiftKey, rawText)
-            } else if (e.key === 'Backspace' && rawText === '' && !opts.arabic) {
-              e.preventDefault()
-              ignoreBlur.current = true
-              void commitSession({
-                nextSibling: false,
-                cancel: true,
-                focusPrevious: true,
-                rawText,
-              })
-            }
-          }}
-          onBlur={() => {
-            if (ignoreBlur.current) return
-            void commitSession({
-              nextSibling: false,
-              cancel: false,
-              rawText: inputRef.current?.value,
-            })
-          }}
-        />
+      <span className="lib-label" onClick={(event) => event.stopPropagation()}>
+        {opts.arabic ? (
+          <input
+            ref={inputRef}
+            className="lib-title-input font-arabic"
+            dir="rtl"
+            value={opts.text}
+            placeholder=""
+            aria-label="Arabic title"
+            onChange={(e) => opts.onChange(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation()
+              const rawText = e.currentTarget.value
+              if (e.key === 'Enter' || e.key === 'Escape') {
+                e.preventDefault()
+                ignoreBlur.current = true
+                void commitSession({ nextSibling: false, cancel: e.key === 'Escape', rawText })
+              }
+            }}
+            onBlur={() => {
+              if (ignoreBlur.current) return
+              void commitSession({ nextSibling: false, cancel: false, rawText: inputRef.current?.value })
+            }}
+          />
+        ) : (
+          <TitleInlineEditor
+            key={opts.editorKey}
+            id={opts.editorKey}
+            plain={opts.text}
+            rich={opts.rich}
+            ariaLabel="Title"
+            placeholder=""
+            className="lib-title-input"
+            onChange={(plain, rich) => opts.onChange(plain, rich)}
+            onFocus={() => undefined}
+            onBlur={() => {
+              if (ignoreBlur.current) return
+              void commitSession({ nextSibling: false, cancel: false, rawText: sessionRef.current?.text })
+            }}
+            onKeyDown={(event, _caret, empty) => {
+              event.stopPropagation()
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                ignoreBlur.current = true
+                void commitSession({ nextSibling: true, cancel: false, rawText: sessionRef.current?.text })
+                return true
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                ignoreBlur.current = true
+                void commitSession({ nextSibling: false, cancel: true, rawText: sessionRef.current?.text })
+                return true
+              }
+              if (event.key === 'Tab') {
+                event.preventDefault()
+                void handleTab(event.shiftKey, sessionRef.current?.text)
+                return true
+              }
+              if (event.key === 'Backspace' && empty && !opts.arabic) {
+                event.preventDefault()
+                ignoreBlur.current = true
+                void commitSession({
+                  nextSibling: false,
+                  cancel: true,
+                  focusPrevious: true,
+                  rawText: '',
+                })
+                return true
+              }
+              return false
+            }}
+          />
+        )}
       </span>
     </div>
   )
@@ -587,11 +630,13 @@ export function LibraryTree({
         {renderEditor({
           depth: depth + 1,
           text: session.text,
+          rich: session.rich,
           arabic: false,
           onChange: updateSessionText,
           expanded: false,
           rowType: session.type,
           draft: true,
+          editorKey: `draft:${session.parentId}:${session.afterId ?? 'end'}`,
         })}
       </li>
     )
@@ -612,10 +657,12 @@ export function LibraryTree({
           renderEditor({
             depth,
             text: renaming.text,
+            rich: renaming.rich,
             arabic: renaming.arabic,
             onChange: updateSessionText,
             expanded,
             rowType: node.type,
+            editorKey: `rename:${node.id}:${renaming.arabic ? 'ar' : 'en'}`,
           })
         ) : (
           <div
@@ -647,7 +694,20 @@ export function LibraryTree({
             }}
             onContextMenu={(e) => {
               if (!onContextMenu) return
+              const target = e.target as HTMLElement
+              const inTitle = target.closest('.lib-title, .title-pm, [data-title-editor]')
+              const selection = window.getSelection()
+              if (
+                inTitle &&
+                selection &&
+                !selection.isCollapsed &&
+                selection.anchorNode &&
+                inTitle.contains(selection.anchorNode)
+              ) {
+                return
+              }
               e.preventDefault()
+              e.stopPropagation()
               onContextMenu(node, e)
             }}
           >

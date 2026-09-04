@@ -1,58 +1,71 @@
-/**
- * On-demand page OCR for image-only PDFs.
- *
- * Engine: Tesseract.js (WASM), languages shipped under `/tesseract`.
- * Results are written into the existing `pages` table with `textSource: 'ocr'`
- * so search / copy / Send to Notes reuse the same path as embedded text.
- *
- * Arabic OCR quality is useful but imperfect (diacritics, dense naskh). This is
- * a recogniser, not a second authoritative Muṣḥaf.
- */
-
-import Tesseract from 'tesseract.js'
-import { pagesRepo } from '@/db/repos/documents'
+import { documentsRepo, pagesRepo } from '@/db/repos/documents'
+import { ocrResultsRepo } from '@/db/repos/pageMarks'
 import { normalizeForSearch } from '@/lib/arabic'
 import { pageId } from '@/lib/id'
-import type { OcrWordBox, PageRecord, TextSource } from '@/types'
+import { ocrCacheKey, OCR_ENGINE_ID, OCR_MODEL_VERSION, resolveOcrLanguage } from '@/services/ocr/ocrCache'
+import { getTesseractProvider } from '@/services/ocr/TesseractOcrProvider'
+import type { OcrProvider } from '@/services/ocr/OcrProvider'
+import { buildPageText } from '@/services/pdf/pageText'
+import type { OcrLanguage, OcrResult, PageRecord, TextSource } from '@/types'
 import type { PDFDocumentProxy } from '@/services/pdf/pdfjs'
 
-export type { OcrWordBox }
+export type { OcrWordBox } from '@/types'
+export type OcrProgress = { status: string; progress: number; pageNumber?: number }
 
-export interface OcrPageResult {
-  text: string
-  words: OcrWordBox[]
-  confidence: number
+let provider: OcrProvider = getTesseractProvider()
+
+export function setOcrProvider(next: OcrProvider) {
+  provider = next
 }
 
-export type OcrProgress = { status: string; progress: number }
-
-let workerPromise: Promise<Tesseract.Worker> | null = null
-
-async function getWorker(): Promise<Tesseract.Worker> {
-  if (!workerPromise) {
-    workerPromise = (async () => {
-      const worker = await Tesseract.createWorker('ara+eng', 1, {
-        langPath: '/tesseract',
-        // Prefer local assets; fall back silently if a pack is missing.
-        gzip: true,
-        logger: () => undefined,
-      })
-      await worker.setParameters({
-        // Hint RTL script; still allows English mixed lines.
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-      })
-      return worker
-    })()
-  }
-  return workerPromise
+export function getOcrProvider(): OcrProvider {
+  return provider
 }
 
-/** Rasterise a PDF page at OCR-friendly DPI. */
+export function isImageOnlyPage(page: PageRecord | undefined | null): boolean {
+  if (!page) return false
+  return !page.hasTextLayer || page.textSource === 'none'
+}
+
+export function hasUsableTextLayer(page: PageRecord | undefined | null): boolean {
+  if (!page) return false
+  return page.hasTextLayer && page.textSource === 'embedded' && isUsableNativeText(page.text)
+}
+
+/** Enough real characters to prefer the PDF text layer over OCR. */
+export function isUsableNativeText(text: string): boolean {
+  return text.replace(/\s+/g, ' ').trim().length >= 8
+}
+
+export async function readEmbeddedPageText(
+  pdf: PDFDocumentProxy,
+  pageNumber: number,
+): Promise<{ text: string; itemOffsets: number[]; width: number; height: number; rotation: number }> {
+  const page = await pdf.getPage(pageNumber)
+  const content = await page.getTextContent()
+  const items = content.items as { str?: string; hasEOL?: boolean }[]
+  const { text, itemOffsets } = buildPageText(items)
+  const base = page.getViewport({ scale: 1 })
+  return { text, itemOffsets, width: base.width, height: base.height, rotation: base.rotation }
+}
+
+function preprocessForOcr(source: HTMLCanvasElement): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = source.width
+  canvas.height = source.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return source
+  ctx.filter = 'contrast(1.12) brightness(1.04)'
+  ctx.drawImage(source, 0, 0)
+  ctx.filter = 'none'
+  return canvas
+}
+
 export async function renderPageForOcr(
   pdf: PDFDocumentProxy,
   pageNumber: number,
   targetWidth = 1600,
-): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }> {
+): Promise<{ canvas: HTMLCanvasElement; width: number; height: number; rotation: number }> {
   const page = await pdf.getPage(pageNumber)
   const base = page.getViewport({ scale: 1 })
   const scale = targetWidth / base.width
@@ -62,89 +75,107 @@ export async function renderPageForOcr(
   canvas.height = Math.floor(viewport.height)
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Could not create OCR canvas')
-  await page.render({ canvas, viewport }).promise
-  return { canvas, width: base.width, height: base.height }
+  await page.render({ canvas, viewport, intent: 'print' }).promise
+  return { canvas: preprocessForOcr(canvas), width: base.width, height: base.height, rotation: base.rotation }
 }
 
-export async function recogniseCanvas(
-  canvas: HTMLCanvasElement,
-  onProgress?: (p: OcrProgress) => void,
-): Promise<OcrPageResult> {
-  const worker = await getWorker()
-  const result = await worker.recognize(canvas)
-  onProgress?.({ status: 'done', progress: 1 })
-
-  const data = result.data
-  const words: OcrWordBox[] = []
-  const pageW = canvas.width || 1
-  const pageH = canvas.height || 1
-
-  for (const word of data.words ?? []) {
-    const t = word.text?.trim()
-    if (!t) continue
-    const b = word.bbox
-    words.push({
-      text: t,
-      x: b.x0 / pageW,
-      y: b.y0 / pageH,
-      w: (b.x1 - b.x0) / pageW,
-      h: (b.y1 - b.y0) / pageH,
-    })
-  }
-
-  return {
-    text: (data.text ?? '').replace(/\r/g, '').trim(),
-    words,
-    confidence: data.confidence ?? 0,
-  }
-}
-
-/**
- * OCR a page and persist into `pages`. Returns the updated record.
- * Never overwrites a page that already has embedded text.
- */
 export async function ocrPdfPage(
   pdf: PDFDocumentProxy,
   documentId: string,
   pageNumber: number,
   onProgress?: (p: OcrProgress) => void,
+  options: { language?: OcrLanguage; force?: boolean; signal?: AbortSignal } = {},
 ): Promise<PageRecord> {
+  const language = options.language ?? 'ara+eng'
+  if (options.signal?.aborted) throw new DOMException('OCR cancelled', 'AbortError')
+
   const existing = await pagesRepo.get(documentId, pageNumber)
-  if (existing?.textSource === 'embedded' && existing.hasTextLayer) {
+  if (!options.force && existing && hasUsableTextLayer(existing)) return existing
+  if (
+    !options.force &&
+    existing?.textSource === 'ocr' &&
+    existing.hasTextLayer &&
+    existing.text.trim() &&
+    (!existing.ocrLanguage || existing.ocrLanguage === resolveOcrLanguage(language))
+  ) {
     return existing
   }
-  if (existing?.textSource === 'ocr' && existing.hasTextLayer && existing.text.trim()) {
-    return existing
+
+  const embedded = await readEmbeddedPageText(pdf, pageNumber)
+  if (!options.force && isUsableNativeText(embedded.text)) {
+    const record: PageRecord = {
+      id: pageId(documentId, pageNumber),
+      documentId,
+      pageNumber,
+      text: embedded.text,
+      normalizedText: normalizeForSearch(embedded.text),
+      itemOffsets: embedded.itemOffsets,
+      width: embedded.width,
+      height: embedded.height,
+      rotation: embedded.rotation,
+      hasTextLayer: true,
+      textSource: 'embedded',
+      indexedAt: Date.now(),
+    }
+    await pagesRepo.put(record)
+    return record
   }
 
-  onProgress?.({ status: 'rendering', progress: 0.05 })
-  const { canvas, width, height } = await renderPageForOcr(pdf, pageNumber)
-  onProgress?.({ status: 'recognising', progress: 0.15 })
-
-  // Rough progress heartbeat while Tesseract runs.
-  let tick = 0.15
-  const timer = window.setInterval(() => {
-    tick = Math.min(0.9, tick + 0.05)
-    onProgress?.({ status: 'recognising', progress: tick })
-  }, 400)
-
-  let result: OcrPageResult
-  try {
-    result = await recogniseCanvas(canvas)
-  } finally {
-    window.clearInterval(timer)
+  const meta = await documentsRepo.get(documentId)
+  const fingerprint = meta?.fingerprint ?? documentId
+  const cacheId = ocrCacheKey({ fingerprint, pageNumber, language })
+  const cached = await ocrResultsRepo.get(cacheId)
+  if (!options.force && cached) {
+    return persistOcrPage(documentId, pageNumber, existing, cached, {
+      width: embedded.width,
+      height: embedded.height,
+      rotation: embedded.rotation,
+    })
   }
 
+  onProgress?.({ status: 'rendering', progress: 0.05, pageNumber })
+  const { canvas, width, height, rotation } = await renderPageForOcr(pdf, pageNumber)
+  if (options.signal?.aborted) throw new DOMException('OCR cancelled', 'AbortError')
+  onProgress?.({ status: 'recognising', progress: 0.2, pageNumber })
+
+  const recognised = await provider.recognize({ canvas, pageNumber, language }, options.signal)
+  if (options.signal?.aborted) throw new DOMException('OCR cancelled', 'AbortError')
+  const row: OcrResult = {
+    id: cacheId,
+    documentId,
+    fingerprint,
+    pageNumber,
+    language: resolveOcrLanguage(language),
+    engine: recognised.engine || OCR_ENGINE_ID,
+    modelVersion: recognised.modelVersion || OCR_MODEL_VERSION,
+    text: recognised.text,
+    words: recognised.words,
+    lines: recognised.lines,
+    confidence: recognised.confidence,
+    direction: recognised.direction,
+    createdAt: Date.now(),
+  }
+  await ocrResultsRepo.put(row)
+  onProgress?.({ status: 'done', progress: 1, pageNumber })
+  return persistOcrPage(documentId, pageNumber, existing, row, { width, height, rotation })
+}
+
+async function persistOcrPage(
+  documentId: string,
+  pageNumber: number,
+  existing: PageRecord | undefined,
+  row: OcrResult,
+  geometry?: { width: number; height: number; rotation: number },
+): Promise<PageRecord> {
   const itemOffsets: number[] = []
   let cursor = 0
   const parts: string[] = []
-  for (const word of result.words) {
+  for (const word of row.words) {
     itemOffsets.push(cursor)
     parts.push(word.text)
     cursor += word.text.length + 1
   }
-  const text = result.words.length ? parts.join(' ') : result.text
-
+  const text = row.words.length ? parts.join(' ') : row.text
   const record: PageRecord = {
     id: pageId(documentId, pageNumber),
     documentId,
@@ -152,21 +183,23 @@ export async function ocrPdfPage(
     text,
     normalizedText: normalizeForSearch(text),
     itemOffsets: itemOffsets.length ? itemOffsets : [0],
-    width,
-    height,
-    rotation: 0,
+    width: geometry?.width ?? existing?.width ?? 1,
+    height: geometry?.height ?? existing?.height ?? 1,
+    rotation: geometry?.rotation ?? existing?.rotation ?? 0,
     hasTextLayer: text.trim().length > 0,
     textSource: (text.trim().length > 0 ? 'ocr' : 'none') as TextSource,
     indexedAt: Date.now(),
-    ocrWords: result.words,
+    ocrWords: row.words,
+    ocrLanguage: row.language,
+    ocrEngine: row.engine,
+    ocrModelVersion: row.modelVersion,
+    ocrConfidence: row.confidence,
+    ocrDirection: row.direction,
   }
-
   await pagesRepo.put(record)
-  onProgress?.({ status: 'done', progress: 1 })
   return record
 }
 
-export function isImageOnlyPage(page: PageRecord | undefined | null): boolean {
-  if (!page) return false
-  return !page.hasTextLayer || page.textSource === 'none'
+export async function terminateOcr(): Promise<void> {
+  await provider.terminate()
 }

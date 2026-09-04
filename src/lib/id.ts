@@ -17,6 +17,8 @@ export const ids = {
   lesson: () => newId('les'),
   libraryPage: () => newId('lpage'),
   libraryBlock: () => newId('lblk'),
+  pageMark: () => newId('pmk'),
+  ocrResult: () => newId('ocr'),
 }
 
 export const pageId = (documentId: string, pageNumber: number) => `${documentId}:${pageNumber}`

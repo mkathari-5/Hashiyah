@@ -1,13 +1,15 @@
 import Dexie from 'dexie'
 import { StrictMode } from 'react'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { TextSelection } from '@tiptap/pm/state'
 import { db } from '@/db/db'
 import { libraryBlocksRepo, libraryPagesRepo, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryHome } from '@/features/library/LibraryHome'
 import { LibraryEditor } from '@/features/library/LibraryEditor'
 import { LIBRARY_BLOCK_CATALOGUE, PREVIOUS_LIBRARY_TITLE } from '@/features/library/libraryPageModel'
+import type { TitleEditorHost } from '@/features/library/TitleInlineEditor'
 import { useLibraryStore } from '@/state/useLibraryStore'
 
 beforeEach(async () => {
@@ -22,28 +24,90 @@ async function editorReady() {
   return screen.findByLabelText('Text')
 }
 
+function pmEl(from: HTMLElement | null | undefined): HTMLElement | null {
+  if (!from) return null
+  if (from.classList.contains('ProseMirror')) return from
+  return (from.querySelector('.ProseMirror') as HTMLElement | null) ?? from.closest('.ProseMirror')
+}
+
+function editorViewFrom(from: HTMLElement) {
+  const host = (
+    from.closest('[data-title-editor]') ?? from.querySelector('[data-title-editor]') ?? from.closest('.page-block')?.querySelector('[data-title-editor]')
+  ) as TitleEditorHost | null
+  return host?.__editorView ?? null
+}
+
 function fill(el: HTMLElement, value: string) {
-  fireEvent.change(el, { target: { value } })
-  if (el instanceof HTMLTextAreaElement) el.setSelectionRange(value.length, value.length)
+  const view = editorViewFrom(el)
+  if (view) {
+    const size = view.state.doc.content.size
+    view.dispatch(view.state.tr.insertText(value, 1, Math.max(1, size - 1)))
+    return
+  }
+  if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+    fireEvent.change(el, { target: { value } })
+    el.setSelectionRange(value.length, value.length)
+  }
+}
+
+function pressKey(el: HTMLElement, key: string, init: KeyboardEventInit = {}) {
+  const view = editorViewFrom(el)
+  const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
+  if (view) {
+    const handled = view.someProp('handleKeyDown', (fn) => fn(view, event))
+    if (handled) return
+  }
+  fireEvent.keyDown((view?.dom as HTMLElement | undefined) ?? pmEl(el) ?? el, { key, ...init })
 }
 
 function pressEnter(el: HTMLElement) {
-  if (el instanceof HTMLTextAreaElement) el.setSelectionRange(el.value.length, el.value.length)
-  fireEvent.keyDown(el, { key: 'Enter' })
+  const view = editorViewFrom(el)
+  if (view) {
+    const end = Math.max(1, view.state.doc.content.size - 1)
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end)))
+  }
+  pressKey(el, 'Enter')
 }
 
 function emptyByLabel(label: string, parentId = '') {
   const el = screen.getAllByLabelText(label).find((node) => {
-    const area = node as HTMLTextAreaElement
-    if (!(area instanceof HTMLTextAreaElement) || area.value !== '') return false
-    return node.closest('[data-parent-id]')?.getAttribute('data-parent-id') === parentId
+    const host = node.closest('[data-parent-id]')
+    if (host?.getAttribute('data-parent-id') !== parentId) return false
+    const plain = host.querySelector('[data-plain]')?.getAttribute('data-plain')
+    if (plain != null) return plain === ''
+    return node instanceof HTMLTextAreaElement && node.value === ''
   })
   if (!el) throw new Error(`No empty ${label} block for parent "${parentId}"`)
   return el
 }
 
+async function setCaret(el: HTMLElement, pos: number) {
+  const host = (el.closest('.page-block') as HTMLElement | null) ?? el
+  if (!pmEl(host) && !editorViewFrom(host)) {
+    const idle = host.querySelector('.page-block-input.is-idle') as HTMLElement | null
+    fireEvent.click(idle ?? host)
+    await waitFor(() => {
+      if (!editorViewFrom(host)) throw new Error('editor not mounted')
+    })
+  }
+  const view = editorViewFrom(host)
+  if (!view) return
+  const at = Math.max(1, Math.min(pos + 1, view.state.doc.content.size - 1))
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)))
+}
+
 function emptyText(parentId = '') {
   return emptyByLabel('Text', parentId)
+}
+
+function placeholderOf(el: HTMLElement) {
+  return (
+    el.getAttribute('placeholder') ||
+    el.getAttribute('data-placeholder') ||
+    el.closest('[data-placeholder]')?.getAttribute('data-placeholder') ||
+    el.querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ||
+    ''
+  )
 }
 
 async function stored() {
@@ -65,7 +129,11 @@ describe('Library page editor', () => {
     const title = screen.getByLabelText('Page title') as HTMLInputElement
     expect(title.value).toBe('Library')
     const text = screen.getByLabelText('Text')
-    expect(text).toHaveAttribute('placeholder', "Type '/' for commands")
+    expect(
+      text.getAttribute('placeholder') ??
+        text.closest('[data-placeholder]')?.getAttribute('data-placeholder') ??
+        text.closest('[placeholder]')?.getAttribute('placeholder'),
+    ).toBe("Type '/' for commands")
     expect(text.closest('[data-transient="true"]')).toBeTruthy()
     expect(text.closest('[data-block-type="text"]')?.querySelector('.page-block-caret')).toBeNull()
     expect(await stored()).toHaveLength(0)
@@ -75,9 +143,9 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Keep')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Keep'))
-    const el = screen.getByDisplayValue('Keep') as HTMLTextAreaElement
-    el.setSelectionRange(0, 0)
-    fireEvent.keyDown(el, { key: 'Enter' })
+    const row = screen.getByText('Keep').closest('.page-block') as HTMLElement
+    await setCaret(row, 0)
+    pressKey(row, 'Enter')
     await waitFor(() => emptyText())
     const rows = await stored()
     expect(rows.filter((b) => b.content === 'Keep')).toHaveLength(1)
@@ -90,7 +158,7 @@ describe('Library page editor', () => {
     await waitFor(async () => {
       expect((await stored()).map((b) => b.content)).toEqual(['Introduction'])
     })
-    const intro = screen.getByDisplayValue('Introduction')
+    const intro = screen.getByText('Introduction')
     pressEnter(intro)
     const second = await waitFor(() => emptyText())
     expect(second.closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
@@ -105,10 +173,10 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Line')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Line'))
-    const el = screen.getByDisplayValue('Line')
-    fireEvent.keyDown(el, { key: 'Enter', shiftKey: true })
+    const el = screen.getByText('Line')
+    pressKey(el, 'Enter', { shiftKey: true })
     expect((await stored()).filter((b) => b.content === 'Line')).toHaveLength(1)
-    expect(screen.getByDisplayValue('Line')).toBeInTheDocument()
+    expect(screen.getByText('Line')).toBeInTheDocument()
   })
 
   it('opens a filterable slash menu and converts the current block', async () => {
@@ -118,7 +186,7 @@ describe('Library page editor', () => {
     expect(menu).toHaveTextContent('Heading 1')
     fill(first, '/toggle')
     expect(await screen.findByRole('option', { name: /Toggle list/i })).toBeInTheDocument()
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     const toggle = await screen.findByLabelText('Toggle list')
     fill(toggle, 'Aqidah')
     await waitFor(async () => {
@@ -147,18 +215,18 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     const toggle = await screen.findByLabelText('Toggle list')
     fill(toggle, 'Kitab at-Taharah')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Kitab at-Taharah'))
     expect(screen.getByLabelText('Expand')).toBeInTheDocument()
-    const toggleRow = screen.getByDisplayValue('Kitab at-Taharah').closest('[data-block-type="toggle"]')
+    const toggleRow = screen.getByText('Kitab at-Taharah').closest('[data-block-type="toggle"]')
     expect(toggleRow?.querySelector('.page-block-caret')).toBeTruthy()
     expect(document.querySelectorAll('.page-block-text .page-block-caret')).toHaveLength(0)
     fireEvent.click(screen.getByLabelText('Expand'))
     await waitFor(() => expect(screen.getByTestId('toggle-child-editor')).toBeInTheDocument())
     const nested = screen.getByTestId('toggle-child-editor')
-    expect(nested.querySelector('.page-block-input')).toHaveAttribute('placeholder', "Type '/' for commands")
+    expect(nested.querySelector('.page-block-input')).toHaveAttribute('data-placeholder', "Type '/' for commands")
     const rows = await stored()
     expect(nested.getAttribute('data-parent-id')).toBe(rows[0]?.id)
     expect(nested.getAttribute('data-depth')).toBe('1')
@@ -171,17 +239,17 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     const toggle = await screen.findByLabelText('Toggle list')
     fill(toggle, 'Kitab at-Taharah')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Kitab at-Taharah'))
-    pressEnter(await screen.findByDisplayValue('Kitab at-Taharah'))
+    pressEnter(await screen.findByText('Kitab at-Taharah'))
     const nextToggle = await waitFor(() => emptyByLabel('Toggle list'))
     pressEnter(nextToggle)
     const child = await waitFor(() => emptyText())
     fill(child, 'Inside')
     await waitFor(async () => expect((await stored()).some((b) => b.content === 'Inside')).toBe(true))
-    fireEvent.keyDown(screen.getByDisplayValue('Inside'), { key: 'Tab' })
+    pressKey(screen.getByText('Inside'), 'Tab')
     await waitFor(async () => {
       const blocks = await stored()
       const parent = blocks.find((b) => b.type === 'toggle')
@@ -191,10 +259,10 @@ describe('Library page editor', () => {
     })
     await waitFor(() => expect(screen.getByLabelText('Collapse')).toBeInTheDocument())
     fireEvent.click(screen.getByLabelText('Collapse'))
-    await waitFor(() => expect(screen.queryByDisplayValue('Inside')).toBeNull())
-    fireEvent.click(screen.getByLabelText('Expand'))
-    await waitFor(() => expect(screen.getByDisplayValue('Inside')).toBeInTheDocument())
-    fireEvent.keyDown(screen.getByDisplayValue('Inside'), { key: 'Tab', shiftKey: true })
+    await waitFor(() => expect(screen.queryByText('Inside')).toBeNull())
+    fireEvent.click(await screen.findByLabelText('Expand'))
+    await waitFor(() => expect(screen.getByText('Inside')).toBeInTheDocument())
+    pressKey(screen.getByText('Inside'), 'Tab', { shiftKey: true })
     await waitFor(async () => {
       expect((await stored()).find((b) => b.content === 'Inside')?.parentBlockId).toBeNull()
     })
@@ -204,10 +272,10 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Keep')
     await waitFor(async () => expect((await stored()).length).toBe(1))
-    pressEnter(screen.getByDisplayValue('Keep'))
+    pressEnter(screen.getByText('Keep'))
     const second = await waitFor(() => emptyText())
-    fireEvent.keyDown(second, { key: 'Backspace' })
-    await waitFor(() => expect(screen.getByDisplayValue('Keep')).toBeInTheDocument())
+    pressKey(second, 'Backspace')
+    await waitFor(() => expect(screen.getByText('Keep')).toBeInTheDocument())
     expect((await stored()).map((b) => b.content)).toEqual(['Keep'])
   })
 
@@ -215,7 +283,7 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Alpha')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Alpha'))
-    pressEnter(screen.getByDisplayValue('Alpha'))
+    pressEnter(screen.getByText('Alpha'))
     const trailing = await waitFor(() => emptyText())
     fill(trailing, 'Beta')
     await waitFor(async () => expect((await stored()).map((b) => b.content)).toEqual(['Alpha', 'Beta']))
@@ -266,21 +334,21 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/quote')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     const quote = await screen.findByLabelText('Quote')
     fill(quote, 'A saying')
     pressEnter(quote)
     const next = await waitFor(() => emptyByLabel('Quote'))
     fill(next, '/to-do')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(next, { key: 'Enter' })
-    const todo = await screen.findByLabelText('To-do', { selector: 'textarea' })
+    pressEnter(next)
+    const todo = await screen.findByLabelText('To-do')
     fill(todo, 'Task')
     pressEnter(todo)
     const third = await waitFor(() => emptyByLabel('To-do'))
     fill(third, '/bullet')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(third, { key: 'Enter' })
+    pressEnter(third)
     const bullet = await screen.findByLabelText('Bulleted list')
     fill(bullet, 'Point')
     await waitFor(async () => {
@@ -292,14 +360,14 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     fill(await screen.findByLabelText('Toggle list'), 'Book')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
     fireEvent.click(screen.getByLabelText('Expand'))
     const nested = await screen.findByTestId('toggle-child-editor')
-    const editor = nested.querySelector('textarea')!
+    const editor = (nested.querySelector('.ProseMirror') as HTMLElement | null) ?? nested
     fireEvent.click(editor)
-    await waitFor(() => expect(document.activeElement).toBe(editor))
+    await waitFor(() => expect(nested.contains(document.activeElement)).toBe(true))
     fill(editor, 'Introduction')
     const book = (await stored())[0]!
     await waitFor(async () => {
@@ -308,7 +376,7 @@ describe('Library page editor', () => {
       expect(child?.type).toBe('text')
     })
 
-    pressEnter(screen.getByDisplayValue('Introduction'))
+    pressEnter(screen.getByText('Introduction'))
     const sibling = await waitFor(() => emptyText(book.id))
     fill(sibling, 'Chapter One')
     await waitFor(async () => {
@@ -316,11 +384,11 @@ describe('Library page editor', () => {
       expect(kids.map((b) => b.content)).toEqual(['Introduction', 'Chapter One'])
     })
 
-    pressEnter(screen.getByDisplayValue('Chapter One'))
+    pressEnter(screen.getByText('Chapter One'))
     const third = await waitFor(() => emptyText(book.id))
     fill(third, '/heading 2')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(third, { key: 'Enter' })
+    pressEnter(third)
     const heading = await screen.findByLabelText('Heading 2')
     fill(heading, 'Part')
     await waitFor(async () => {
@@ -328,11 +396,11 @@ describe('Library page editor', () => {
       expect((await stored()).find((b) => b.content === 'Part')?.parentBlockId).toBe(book.id)
     })
 
-    pressEnter(screen.getByDisplayValue('Part'))
+    pressEnter(screen.getByText('Part'))
     const fourth = await waitFor(() => emptyText(book.id))
     fill(fourth, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(fourth, { key: 'Enter' })
+    pressEnter(fourth)
     const section = await waitFor(() => {
       const toggles = screen.getAllByLabelText('Toggle list')
       expect(toggles.length).toBeGreaterThanOrEqual(2)
@@ -344,7 +412,7 @@ describe('Library page editor', () => {
       expect(found).toBeTruthy()
       return found!
     })
-    const sectionRow = screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]') as HTMLElement
+    const sectionRow = screen.getByText('Section One').closest('[data-block-type="toggle"]') as HTMLElement
     const expander = sectionRow.querySelector('[aria-label="Expand"]')
     expect(expander).toBeTruthy()
     fireEvent.click(expander!)
@@ -355,14 +423,14 @@ describe('Library page editor', () => {
       expect(nestedText?.parentBlockId).toBe(sectionBlock.id)
     })
 
-    fireEvent.click(screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Collapse"]')!)
-    await waitFor(() => expect(screen.queryByDisplayValue('Nested text')).toBeNull())
+    fireEvent.click(screen.getByText('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Collapse"]')!)
+    await waitFor(() => expect(screen.queryByText('Nested text')).toBeNull())
     fireEvent.click(screen.getByLabelText('Collapse'))
-    await waitFor(() => expect(screen.queryByDisplayValue('Introduction')).toBeNull())
+    await waitFor(() => expect(screen.queryByText('Introduction')).toBeNull())
     fireEvent.click(screen.getByLabelText('Expand'))
-    await waitFor(() => expect(screen.getByDisplayValue('Introduction')).toBeInTheDocument())
-    fireEvent.click(screen.getByDisplayValue('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Expand"]')!)
-    await waitFor(() => expect(screen.getByDisplayValue('Nested text')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Introduction')).toBeInTheDocument())
+    fireEvent.click(screen.getByText('Section One').closest('[data-block-type="toggle"]')!.querySelector('[aria-label="Expand"]')!)
+    await waitFor(() => expect(screen.getByText('Nested text')).toBeInTheDocument())
     expect((await stored()).every((b) => b.content !== 'Untitled')).toBe(true)
   })
 
@@ -370,11 +438,11 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     fill(await screen.findByLabelText('Toggle list'), 'Book')
     await waitFor(async () => expect((await stored())[0]?.type).toBe('toggle'))
     fireEvent.click(screen.getByLabelText('Expand'))
-    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('.ProseMirror, [data-title-editor]') as HTMLElement
     fill(nested, '/')
     const menu = await screen.findByTestId('slash-menu')
     for (const def of LIBRARY_BLOCK_CATALOGUE) {
@@ -393,20 +461,20 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     fill(await screen.findByLabelText('Toggle list'), 'Book')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
     fireEvent.click(screen.getByLabelText('Expand'))
-    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('.ProseMirror, [data-title-editor]') as HTMLElement
     fill(nested, 'Keep')
     await waitFor(async () => expect((await stored()).some((b) => b.content === 'Keep')).toBe(true))
-    pressEnter(screen.getByDisplayValue('Keep'))
+    pressEnter(screen.getByText('Keep'))
     const book = (await stored()).find((b) => b.type === 'toggle')!
     const extra = await waitFor(() => emptyText(book.id))
     fireEvent.click(extra)
-    fireEvent.keyDown(extra, { key: 'Backspace' })
+    pressKey(extra, 'Backspace')
     await waitFor(() => expect(screen.queryByTestId('toggle-child-editor')).toBeNull())
-    expect(screen.getByDisplayValue('Keep')).toBeInTheDocument()
+    expect(screen.getByText('Keep')).toBeInTheDocument()
     expect((await stored()).filter((b) => b.parentBlockId != null)).toHaveLength(1)
   })
 
@@ -414,8 +482,8 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, 'Alpha')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Alpha'))
-    const alpha = screen.getByDisplayValue('Alpha').closest('.page-block') as HTMLElement
-    pressEnter(screen.getByDisplayValue('Alpha'))
+    const alpha = screen.getByText('Alpha').closest('.page-block') as HTMLElement
+    pressEnter(screen.getByText('Alpha'))
     const trailing = (await waitFor(() => emptyText())).closest('.page-block') as HTMLElement
     const before = alpha.style.getPropertyValue('--indent')
     fireEvent.mouseEnter(alpha)
@@ -432,17 +500,17 @@ describe('Library page editor', () => {
     const first = await editorReady()
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     fill(await screen.findByLabelText('Toggle list'), 'Book')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
     fireEvent.click(screen.getByLabelText('Expand'))
     const child = (await screen.findByTestId('toggle-child-editor')) as HTMLElement
     expect(child.dataset.depth).toBe('1')
     expect(child.dataset.indent).toBe('1.5')
-    const nestedTa = child.querySelector('textarea')!
+    const nestedTa = child.querySelector('.ProseMirror, [data-title-editor]') as HTMLElement
     fill(nestedTa, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(nestedTa, { key: 'Enter' })
+    pressEnter(nestedTa)
     const innerToggle = await waitFor(() => {
       const toggles = screen.getAllByLabelText('Toggle list')
       expect(toggles.length).toBeGreaterThanOrEqual(2)
@@ -450,10 +518,10 @@ describe('Library page editor', () => {
     })
     fill(innerToggle, 'Section')
     await waitFor(async () => expect((await stored()).some((b) => b.content === 'Section')).toBe(true))
-    const sectionRow = screen.getByDisplayValue('Section').closest('[data-block-type="toggle"]') as HTMLElement
+    const sectionRow = screen.getByText('Section').closest('[data-block-type="toggle"]') as HTMLElement
     fireEvent.click(sectionRow.querySelector('[aria-label="Expand"]')!)
     const grand = await waitFor(() => {
-      const section = (screen.getByDisplayValue('Section').closest('[data-block-type="toggle"]') as HTMLElement)
+      const section = (screen.getByText('Section').closest('[data-block-type="toggle"]') as HTMLElement)
         .parentElement
       const draft = section?.querySelector('[data-testid="toggle-child-editor"]') as HTMLElement | null
       expect(draft).toBeTruthy()
@@ -469,15 +537,15 @@ describe('Library page editor', () => {
     const first = await screen.findByLabelText('Text')
     fill(first, '/toggle')
     await screen.findByTestId('slash-menu')
-    fireEvent.keyDown(first, { key: 'Enter' })
+    pressEnter(first)
     fill(await screen.findByLabelText('Toggle list'), 'Book')
     await waitFor(async () => expect((await stored())[0]?.content).toBe('Book'))
     fireEvent.click(screen.getByLabelText('Expand'))
-    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('textarea')!
+    const nested = (await screen.findByTestId('toggle-child-editor')).querySelector('.ProseMirror, [data-title-editor]') as HTMLElement
     fill(nested, 'Introduction')
     await waitFor(async () => expect((await stored()).some((b) => b.content === 'Introduction')).toBe(true))
     const book = (await stored()).find((b) => b.type === 'toggle')!
-    pressEnter(screen.getByDisplayValue('Introduction'))
+    pressEnter(screen.getByText('Introduction'))
     fill(await waitFor(() => emptyText(book.id)), 'Chapter One')
     await waitFor(async () => {
       const kids = (await stored()).filter((b) => b.parentBlockId === book.id)
@@ -485,12 +553,12 @@ describe('Library page editor', () => {
     })
     view.unmount()
     render(<LibraryHome onImport={() => undefined} />)
-    await waitFor(() => expect(screen.getByDisplayValue('Book')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Book')).toBeInTheDocument())
     expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
-    const caret = screen.getByDisplayValue('Book').closest('[data-block-type="toggle"]')?.querySelector('[aria-label="Expand"]')
+    const caret = screen.getByText('Book').closest('[data-block-type="toggle"]')?.querySelector('[aria-label="Expand"]')
     if (caret) fireEvent.click(caret)
-    await waitFor(() => expect(screen.getByDisplayValue('Introduction')).toBeInTheDocument())
-    expect(screen.getByDisplayValue('Chapter One')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('Introduction')).toBeInTheDocument())
+    expect(screen.getByText('Chapter One')).toBeInTheDocument()
     const blocks = await stored()
     expect(blocks.find((b) => b.content === 'Introduction')?.parentBlockId).toBe(book.id)
     expect(blocks.find((b) => b.content === 'Chapter One')?.parentBlockId).toBe(book.id)
@@ -504,7 +572,7 @@ describe('Library page editor', () => {
       content: 'fafawf',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    await screen.findByDisplayValue('fafawf')
+    await screen.findByText('fafawf')
     expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
     expect(screen.queryByLabelText('Text')).toBeNull()
   })
@@ -516,11 +584,11 @@ describe('Library page editor', () => {
       content: 'fafawf',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    await screen.findByDisplayValue('fafawf')
-    fireEvent.click(screen.getByDisplayValue('fafawf'))
+    await screen.findByText('fafawf')
+    fireEvent.click(screen.getByText('fafawf'))
     fireEvent.click(screen.getByTestId('page-editor-tail'))
     const draft = await waitFor(() => emptyText())
-    expect(draft).toHaveAttribute('placeholder', "Type '/' for commands")
+    expect(placeholderOf(draft)).toBe("Type '/' for commands")
     expect(draft.closest('[data-transient="true"]')).toBeTruthy()
     expect(await stored()).toHaveLength(1)
     screen.getByLabelText('Page title').focus()
@@ -544,12 +612,12 @@ describe('Library page editor', () => {
       content: 'Inside Aqidah',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    const title = await screen.findByDisplayValue('Aqidah')
+    const title = await screen.findByText('Aqidah')
     pressEnter(title)
     const sibling = await waitFor(() => emptyByLabel('Toggle list'))
     expect(sibling.closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
     expect(sibling.closest('[data-block-type]')?.getAttribute('data-block-type')).toBe('toggle')
-    await waitFor(() => expect(document.activeElement).toBe(sibling))
+    await waitFor(() => expect(sibling.closest('.page-block')?.contains(document.activeElement)).toBe(true))
     expect(screen.queryByPlaceholderText("Type '/' for commands")).toBeNull()
     fill(sibling, 'Tawhid')
     await waitFor(async () => {
@@ -563,10 +631,10 @@ describe('Library page editor', () => {
       expect(rows.filter((b) => !b.content.trim())).toHaveLength(0)
       expect(rows.every((b) => b.content !== 'Untitled')).toBe(true)
     })
-    const aqidahRow = screen.getByDisplayValue('Aqidah').closest('[data-block-type="toggle"]') as HTMLElement
+    const aqidahRow = screen.getByText('Aqidah').closest('[data-block-type="toggle"]') as HTMLElement
     fireEvent.click(aqidahRow.querySelector('[aria-label="Expand"]')!)
-    await waitFor(() => expect(screen.getByDisplayValue('Inside Aqidah')).toBeInTheDocument())
-    expect(screen.getByDisplayValue('Tawhid').closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
+    await waitFor(() => expect(screen.getByText('Inside Aqidah')).toBeInTheDocument())
+    expect(screen.getByText('Tawhid').closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
   })
 
   it('Enter after a collapsed or expanded toggle still creates a sibling', async () => {
@@ -577,7 +645,7 @@ describe('Library page editor', () => {
       expanded: true,
     })
     render(<LibraryHome onImport={() => undefined} />)
-    pressEnter(await screen.findByDisplayValue('Aqidah'))
+    pressEnter(await screen.findByText('Aqidah'))
     const sibling = await waitFor(() => emptyByLabel('Toggle list'))
     expect(sibling.closest('[data-parent-id]')?.getAttribute('data-parent-id')).toBe('')
     fill(sibling, 'Tawhid')
@@ -595,13 +663,13 @@ describe('Library page editor', () => {
       content: 'First',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    pressEnter(await screen.findByDisplayValue('First'))
+    pressEnter(await screen.findByText('First'))
     const bullet = await waitFor(() => emptyByLabel('Bulleted list'))
     fill(bullet, 'Second')
     await waitFor(async () => {
       expect((await stored()).filter((b) => b.type === 'bullet').map((b) => b.content)).toEqual(['First', 'Second'])
     })
-    pressEnter(screen.getByDisplayValue('Second'))
+    pressEnter(screen.getByText('Second'))
     const emptyBullet = await waitFor(() => emptyByLabel('Bulleted list'))
     pressEnter(emptyBullet)
     await waitFor(() => expect(emptyText()).toBeTruthy())
@@ -619,7 +687,7 @@ describe('Library page editor', () => {
       content: 'One',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    pressEnter(await screen.findByDisplayValue('One'))
+    pressEnter(await screen.findByText('One'))
     const next = await waitFor(() => emptyByLabel('Numbered list'))
     fill(next, 'Two')
     await waitFor(async () => {
@@ -634,7 +702,7 @@ describe('Library page editor', () => {
       content: 'Task',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    pressEnter(await screen.findByDisplayValue('Task'))
+    pressEnter(await screen.findByText('Task'))
     const next = await waitFor(() => emptyByLabel('To-do'))
     fill(next, 'Next')
     await waitFor(async () => {
@@ -658,11 +726,14 @@ describe('Library page editor', () => {
       })
     }
     render(<LibraryHome onImport={() => undefined} />)
-    pressEnter(await screen.findByDisplayValue('f'))
+    pressEnter(await screen.findByText('f'))
     const sibling = await waitFor(() => emptyByLabel('Toggle list', parent.id))
-    await waitFor(() => expect(document.activeElement).toBe(sibling))
+    await waitFor(() => expect(sibling.closest('.page-block')?.contains(document.activeElement)).toBe(true))
     const values = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
-      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+      (el) =>
+        el.querySelector('[data-plain]')?.getAttribute('data-plain') ??
+        el.getAttribute('data-plain') ??
+        '',
     )
     expect(values).toEqual(['a', 'b', 'c', 'd', 'f', '', 'g', 'h'])
     expect(sibling.closest('[data-block-type]')?.getAttribute('data-block-type')).toBe('toggle')
@@ -686,16 +757,22 @@ describe('Library page editor', () => {
       await libraryBlocksRepo.update(row.id, { order: 0 })
     }
     render(<LibraryHome onImport={() => undefined} />)
-    await screen.findByDisplayValue('a')
+    await screen.findByText('a')
     const before = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
-      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+      (el) =>
+        el.querySelector('[data-plain]')?.getAttribute('data-plain') ??
+        el.getAttribute('data-plain') ??
+        '',
     )
     expect(before).toHaveLength(7)
     const focused = before[3]
-    pressEnter(screen.getByDisplayValue(focused!))
+    pressEnter(screen.getByText(focused!))
     await waitFor(() => emptyByLabel('Toggle list', parent.id))
     const values = [...document.querySelectorAll(`[data-parent-id="${parent.id}"]`)].map(
-      (el) => (el.querySelector('textarea') as HTMLTextAreaElement | null)?.value,
+      (el) =>
+        el.querySelector('[data-plain]')?.getAttribute('data-plain') ??
+        el.getAttribute('data-plain') ??
+        '',
     )
     expect(values[4]).toBe('')
     expect(values[3]).toBe(focused)
@@ -715,9 +792,9 @@ describe('Library page editor', () => {
       content: 'Child',
     })
     render(<LibraryHome onImport={() => undefined} />)
-    const el = (await screen.findByDisplayValue('Hello World')) as HTMLTextAreaElement
-    el.setSelectionRange(6, 6)
-    fireEvent.keyDown(el, { key: 'Enter' })
+    const row = (await screen.findByText('Hello World')).closest('.page-block') as HTMLElement
+    await setCaret(row, 6)
+    pressKey(row, 'Enter')
     await waitFor(async () => {
       const rows = await stored()
       expect(rows.find((b) => b.id === aqidah.id)?.content).toBe('Hello ')
@@ -727,7 +804,7 @@ describe('Library page editor', () => {
       expect(next?.order).toBeGreaterThan(rows.find((b) => b.id === aqidah.id)!.order)
       expect(rows.find((b) => b.content === 'Child')?.parentBlockId).toBe(aqidah.id)
     })
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByDisplayValue('World')))
+    await waitFor(() => expect(screen.getByText('World').closest('.page-block')?.contains(document.activeElement)).toBe(true))
   })
 
   it('hovering Previous Library reveals only that row’s controls without moving the title', async () => {
@@ -748,7 +825,7 @@ describe('Library page editor', () => {
     })
     render(<LibraryHome onImport={() => undefined} />)
     const archive = (await screen.findByText(PREVIOUS_LIBRARY_TITLE)).closest('.page-block') as HTMLElement
-    const other = (await screen.findByDisplayValue('fafawf')).closest('.page-block') as HTMLElement
+    const other = (await screen.findByText('fafawf')).closest('.page-block') as HTMLElement
     expect(archive).toHaveAttribute('data-block-type', 'page')
     expect(archive).toHaveClass('page-block-page')
     expect(archive.querySelector('.page-block-page-link')).toBeTruthy()
@@ -769,5 +846,41 @@ describe('Library page editor', () => {
     expect(archive.parentElement?.closest('.page-editor')).toBeTruthy()
     fireEvent.mouseLeave(archive)
     expect(archive).not.toHaveClass('is-gutter-on')
+  })
+
+  it('right-click opens a custom delete menu and cancel keeps the row', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'Kitab at-Taharah',
+    })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      parentBlockId: (await stored())[0]!.id,
+      type: 'text',
+      content: 'Wudu',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    const row = await screen.findByText('Kitab at-Taharah')
+    fireEvent.contextMenu(row)
+    expect(screen.getByRole('menu', { name: 'Library row' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete' }))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('nested item')
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect((await stored()).map((b) => b.content)).toEqual(expect.arrayContaining(['Kitab at-Taharah', 'Wudu']))
+  })
+
+  it('closes the row menu with Escape', async () => {
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'text',
+      content: 'Scratch',
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    fireEvent.contextMenu(await screen.findByText('Scratch'))
+    expect(screen.getByRole('menu')).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull())
   })
 })
