@@ -77,37 +77,64 @@ export const NoteFind = Extension.create({
   },
 })
 
-function countHits(editor: Editor, query: string): number {
+export interface FindHit {
+  from: number
+  to: number
+}
+
+export function collectFindHits(editor: Editor, query: string): FindHit[] {
   const needle = normalize(query).text
-  if (!needle) return 0
-  let total = 0
-  editor.state.doc.descendants((node) => {
+  if (!needle) return []
+  const hits: FindHit[] = []
+  editor.state.doc.descendants((node, pos) => {
     if (!node.isText || !node.text) return
-    const norm = normalize(node.text).text
-    let from = 0
+    const norm = normalize(node.text)
+    let searchFrom = 0
     for (;;) {
-      const at = norm.indexOf(needle, from)
+      const at = norm.text.indexOf(needle, searchFrom)
       if (at === -1) break
-      total += 1
-      from = at + 1
+      const rawStart = norm.map[at]
+      const rawEnd =
+        at + needle.length >= norm.map.length ? node.text.length : norm.map[at + needle.length]
+      hits.push({ from: pos + rawStart, to: pos + rawEnd })
+      searchFrom = at + 1
     }
   })
-  return total
+  return hits
+}
+
+export function replaceFindHits(editor: Editor, hits: FindHit[], replacement: string): void {
+  if (!hits.length) return
+  const ordered = [...hits].sort((a, b) => b.from - a.from)
+  let chain = editor.chain().focus()
+  for (const hit of ordered) {
+    chain = chain.insertContentAt({ from: hit.from, to: hit.to }, replacement)
+  }
+  chain.run()
 }
 
 export function NoteFindBar({ editor, onClose, replace = false }: { editor: Editor; onClose: () => void; replace?: boolean }) {
   const [query, setQuery] = useState('')
   const [replacement, setReplacement] = useState('')
   const [current, setCurrent] = useState(0)
+  const [docRev, setDocRev] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => inputRef.current?.focus(), [])
 
-  const total = useMemo(
-    () => (query.trim() ? countHits(editor, query) : 0),
-    // Recount whenever the query changes; the document is stable while finding.
-    [editor, query],
-  )
+  useEffect(() => {
+    const onUpdate = () => setDocRev((n) => n + 1)
+    editor.on('update', onUpdate)
+    return () => {
+      editor.off('update', onUpdate)
+    }
+  }, [editor])
+
+  const hits = useMemo(() => {
+    void docRev
+    return query.trim() ? collectFindHits(editor, query) : []
+  }, [editor, query, docRev])
+  const total = hits.length
 
   useEffect(() => {
     editor.view.dispatch(editor.state.tr.setMeta(findPluginKey, { query, current }))
@@ -121,44 +148,37 @@ export function NoteFindBar({ editor, onClose, replace = false }: { editor: Edit
 
   useEffect(() => setCurrent(0), [query])
 
+  useEffect(() => {
+    if (total === 0) return
+    if (current >= total) setCurrent(total - 1)
+  }, [current, total])
+
+  useEffect(() => {
+    const hit = hits[current]
+    if (!hit) return
+    editor.chain().setTextSelection({ from: hit.from, to: hit.to }).scrollIntoView().run()
+    inputRef.current?.focus()
+  }, [editor, hits, current])
+
   const step = (delta: 1 | -1) => {
     if (total === 0) return
     setCurrent((c) => (c + delta + total) % total)
   }
 
   const replaceCurrent = () => {
-    if (!query.trim() || total === 0) return
-    const { state } = editor
-    let hit = 0
-    let from = 0
-    let to = 0
-    const needle = normalize(query).text
-    state.doc.descendants((node, pos) => {
-      if (!node.isText || !node.text) return
-      const norm = normalize(node.text)
-      let searchFrom = 0
-      for (;;) {
-        const at = norm.text.indexOf(needle, searchFrom)
-        if (at === -1) break
-        if (hit === current) {
-          const rawStart = norm.map[at]
-          const rawEnd =
-            at + needle.length >= norm.map.length ? node.text.length : norm.map[at + needle.length]
-          from = pos + rawStart
-          to = pos + rawEnd
-          return false
-        }
-        hit += 1
-        searchFrom = at + 1
-      }
-    })
-    if (to > from) {
-      editor.chain().focus().insertContentAt({ from, to }, replacement).run()
-    }
+    const hit = hits[current]
+    if (!hit) return
+    replaceFindHits(editor, [hit], replacement)
+  }
+
+  const replaceAll = () => {
+    if (!hits.length) return
+    replaceFindHits(editor, hits, replacement)
+    setCurrent(0)
   }
 
   return (
-    <div className="border-line bg-panel flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+    <div className="notes-find-bar" role="search">
       <Icon name="search" className="text-ink-faint h-3.5 w-3.5" />
       <input
         ref={inputRef}
@@ -174,6 +194,7 @@ export function NoteFindBar({ editor, onClose, replace = false }: { editor: Edit
           }
         }}
         placeholder="Find in this note"
+        aria-label="Find in this note"
         className="text-ink placeholder:text-ink-faint flex-1 bg-transparent text-xs outline-none"
       />
       {replace && (
@@ -209,9 +230,14 @@ export function NoteFindBar({ editor, onClose, replace = false }: { editor: Edit
         <Icon name="chevron-down" className="h-3.5 w-3.5" />
       </button>
       {replace && (
-        <button type="button" className="ui-btn" onClick={replaceCurrent}>
-          Replace
-        </button>
+        <>
+          <button type="button" className="ui-btn" onClick={replaceCurrent}>
+            Replace
+          </button>
+          <button type="button" className="ui-btn" onClick={replaceAll}>
+            Replace all
+          </button>
+        </>
       )}
       <button
         onClick={onClose}

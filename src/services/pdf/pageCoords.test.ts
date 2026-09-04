@@ -5,7 +5,9 @@ import {
   fromDisplayPoint,
   horizontalLineFromDrag,
   markCssBox,
+  movedRect,
   normalizedToClient,
+  resizedRect,
   rotateRect,
   toDisplayPoint,
   underlineRectForLine,
@@ -90,18 +92,20 @@ describe('pageCoords', () => {
 
   it('moves a text box in page space without using the mark CSS size as a divisor', () => {
     const origin = { x: 0.2, y: 0.3, w: 0.2, h: 0.05 }
-    const start = clientToNormalized({ x: 180, y: 290 }, PAGE)
-    const now = clientToNormalized({ x: 220, y: 330 }, PAGE)
-    const moved = {
-      ...origin,
-      x: origin.x + (now.x - start.x),
-      y: origin.y + (now.y - start.y),
-    }
+    const moved = movedRect(origin, { x: 180, y: 290 }, { x: 220, y: 330 }, PAGE)
     expect(moved.x).toBeCloseTo(0.3)
     expect(moved.y).toBeCloseTo(0.35)
     const zoomedPage = { ...PAGE, width: 800, height: 1600 }
     const startZ = clientToNormalized({ x: 180, y: 290 }, zoomedPage)
     const nowZ = clientToNormalized({ x: 260, y: 370 }, zoomedPage)
     expect(nowZ.x - startZ.x).toBeCloseTo(0.1)
+  })
+
+  it('resizes from the origin without inverting the box', () => {
+    const origin = { x: 0.2, y: 0.3, w: 0.2, h: 0.05 }
+    const next = resizedRect(origin, { x: 180, y: 290 }, { x: 220, y: 330 }, PAGE)
+    expect(next.x).toBe(0.2)
+    expect(next.w).toBeCloseTo(0.3)
+    expect(next.h).toBeCloseTo(0.1)
   })
 })

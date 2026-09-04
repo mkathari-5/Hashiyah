@@ -432,6 +432,22 @@ export function LibraryTree({
       const value = liveText.trim()
       if (current.arabic) {
         await libraryRepo.update(node.id, { arabicTitle: value || undefined })
+        if (opts.nextSibling && node.parentId) {
+          const parent = await libraryRepo.get(node.parentId)
+          const type = parent ? childTypeFor(parent.type) : null
+          if (parent && type) {
+            sessionRef.current = {
+              kind: 'draft',
+              parentId: parent.id,
+              afterId: node.id,
+              type,
+              text: '',
+              rich: null,
+            }
+            setSession(sessionRef.current)
+            return
+          }
+        }
         clearSession()
         return
       }
@@ -505,18 +521,19 @@ export function LibraryTree({
     })
 
   const handleDrop = useCallback(
-    async (target: LibraryNode) => {
-      if (!dragId || dragId === target.id || !nodes) return
-      const dragged = nodes.find((n) => n.id === dragId)
+    async (target: LibraryNode, droppedId?: string | null) => {
+      const movingId = droppedId || dragId
+      if (!movingId || movingId === target.id || !nodes) return
+      const dragged = nodes.find((n) => n.id === movingId)
       if (!dragged) return
       if (canNestUnder(dragged.type, target.type)) {
         const children = byParent.get(target.id) ?? []
-        await libraryRepo.move(dragId, target.id, children.length)
+        await libraryRepo.move(movingId, target.id, children.length)
         await libraryRepo.update(target.id, { collapsed: false })
       } else {
         const siblings = byParent.get(target.parentId) ?? []
         await libraryRepo.move(
-          dragId,
+          movingId,
           target.parentId,
           siblings.findIndex((n) => n.id === target.id),
         )
@@ -559,10 +576,16 @@ export function LibraryTree({
             onKeyDown={(e) => {
               e.stopPropagation()
               const rawText = e.currentTarget.value
-              if (e.key === 'Enter' || e.key === 'Escape') {
+              if (e.key === 'Enter') {
                 e.preventDefault()
                 ignoreBlur.current = true
-                void commitSession({ nextSibling: false, cancel: e.key === 'Escape', rawText })
+                void commitSession({ nextSibling: true, cancel: false, rawText })
+                return
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                ignoreBlur.current = true
+                void commitSession({ nextSibling: false, cancel: true, rawText })
               }
             }}
             onBlur={() => {
@@ -671,12 +694,6 @@ export function LibraryTree({
             aria-selected={selected}
             aria-expanded={nestable || children.length > 0 ? expanded : undefined}
             style={{ paddingInlineStart: `${depth * 1.125 + 0.25}rem` }}
-            draggable
-            onDragStart={(e) => {
-              e.stopPropagation()
-              setDragId(node.id)
-              e.dataTransfer.effectAllowed = 'move'
-            }}
             onDragOver={(e) => {
               if (!dragId || dragId === node.id) return
               e.preventDefault()
@@ -686,26 +703,10 @@ export function LibraryTree({
             onDrop={(e) => {
               e.preventDefault()
               e.stopPropagation()
-              void handleDrop(node)
-            }}
-            onDragEnd={() => {
-              setDragId(null)
-              setDropTarget(null)
+              void handleDrop(node, e.dataTransfer.getData('text/plain') || dragId)
             }}
             onContextMenu={(e) => {
               if (!onContextMenu) return
-              const target = e.target as HTMLElement
-              const inTitle = target.closest('.lib-title, .title-pm, [data-title-editor]')
-              const selection = window.getSelection()
-              if (
-                inTitle &&
-                selection &&
-                !selection.isCollapsed &&
-                selection.anchorNode &&
-                inTitle.contains(selection.anchorNode)
-              ) {
-                return
-              }
               e.preventDefault()
               e.stopPropagation()
               onContextMenu(node, e)
@@ -736,6 +737,26 @@ export function LibraryTree({
             ) : (
               <span className="lib-caret" aria-hidden />
             )}
+
+            <button
+              type="button"
+              className="lib-grip"
+              aria-label="Drag to reorder"
+              title="Drag to reorder"
+              draggable
+              onDragStart={(e) => {
+                e.stopPropagation()
+                e.dataTransfer.effectAllowed = 'move'
+                e.dataTransfer.setData('text/plain', node.id)
+                setDragId(node.id)
+              }}
+              onDragEnd={() => {
+                setDragId(null)
+                setDropTarget(null)
+              }}
+            >
+              <Icon name="grip" className="h-3 w-3" />
+            </button>
 
             <button
               type="button"

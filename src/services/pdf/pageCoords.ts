@@ -150,6 +150,40 @@ export function translateRect(rect: NormalizedRect, dx: number, dy: number): Nor
   return { ...rect, x: rect.x + dx, y: rect.y + dy }
 }
 
+export function movedRect(
+  origin: NormalizedRect,
+  startClient: PagePoint,
+  nowClient: PagePoint,
+  page: PageBox,
+  rotation: PageRotation = 0,
+): NormalizedRect {
+  const start = clientToNormalized(startClient, page, rotation)
+  const now = clientToNormalized(nowClient, page, rotation)
+  return {
+    ...origin,
+    x: origin.x + (now.x - start.x),
+    y: origin.y + (now.y - start.y),
+  }
+}
+
+export function resizedRect(
+  origin: NormalizedRect,
+  startClient: PagePoint,
+  nowClient: PagePoint,
+  page: PageBox,
+  rotation: PageRotation = 0,
+  minW = 0.08,
+  minH = 0.03,
+): NormalizedRect {
+  const start = clientToNormalized(startClient, page, rotation)
+  const now = clientToNormalized(nowClient, page, rotation)
+  return {
+    ...origin,
+    w: Math.max(minW, origin.w + (now.x - start.x)),
+    h: Math.max(minH, origin.h + (now.y - start.y)),
+  }
+}
+
 export function underlineRectForLine(line: NormalizedRect, thickness = 0.007): NormalizedRect {
   const h = Math.max(thickness, Math.min(0.012, line.h * 0.12 || thickness))
   return {

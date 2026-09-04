@@ -123,6 +123,12 @@ export function LibraryEditor({
   }, [page?.title])
 
   useEffect(() => {
+    if (!undo) return
+    const timer = window.setTimeout(() => setUndo(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [undo])
+
+  useEffect(() => {
     if (!ready || stored === undefined) return
     setTransients((current) => {
       const incoming = nextTransients(pageId, stored, current, omittedTransients.current, focusId)
@@ -864,7 +870,7 @@ export function LibraryEditor({
       {confirm && (
         <ConfirmDialog
           title="Delete item"
-          body={`${confirm.summary} ${confirm.detail}`}
+          body={[confirm.summary, confirm.detail].filter(Boolean).join(' ')}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             const impact = confirm

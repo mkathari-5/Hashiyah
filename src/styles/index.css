@@ -153,6 +153,10 @@
   position: absolute;
 }
 
+.pdf-page-stage {
+  z-index: 1;
+}
+
 .page-mark-layer {
   position: absolute;
   inset: 0;
@@ -166,14 +170,21 @@
 
 .page-mark {
   position: absolute;
-  pointer-events: auto;
+  pointer-events: none;
   box-sizing: border-box;
+}
+.page-mark-layer.is-interactive .page-mark,
+.page-mark-layer.is-drawing .page-mark {
+  pointer-events: auto;
 }
 .page-mark-text {
   resize: none;
   display: block;
+  position: relative;
+  z-index: 1;
   width: 100%;
-  min-height: 2.1em;
+  height: 100%;
+  min-height: 0;
   border: none;
   background: color-mix(in srgb, var(--color-elevated) 88%, transparent);
   color: inherit;
@@ -190,6 +201,9 @@
   border: 1px solid color-mix(in srgb, var(--color-line-strong) 70%, transparent);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
   border-radius: 3px;
+  overflow: visible;
+  min-width: 4.5rem;
+  min-height: 1.75rem;
 }
 .page-mark.is-margin {
   background: var(--color-elevated);
@@ -200,19 +214,31 @@
 }
 .page-mark-area {
   mix-blend-mode: multiply;
+  cursor: grab;
 }
 :root.dark .page-mark-area {
   mix-blend-mode: screen;
 }
 .page-mark-line {
   border-radius: 1px;
+  cursor: grab;
+}
+.page-mark-line::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 14px;
+  transform: translateY(-50%);
 }
 .page-mark-resize {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
-  width: 8px;
-  height: 8px;
+  right: -4px;
+  bottom: -4px;
+  z-index: 5;
+  width: 10px;
+  height: 10px;
   border-radius: 1px;
   background: var(--color-accent);
   cursor: nwse-resize;
@@ -343,19 +369,42 @@
   pointer-events: none;
 }
 
+.pdf-page.is-tool-highlight,
+.pdf-page.is-tool-underline {
+  cursor: crosshair;
+}
+.pdf-page.is-tool-erase {
+  cursor: pointer;
+}
+.pdf-page.is-drawing-markup {
+  cursor: crosshair;
+  user-select: none;
+  touch-action: none;
+}
+.pdf-page.is-drawing-markup .textLayer {
+  pointer-events: none;
+  user-select: none;
+}
+
+.pdf-canvas.is-panning .page-mark-layer,
+.pdf-canvas.is-panning .page-mark,
+.pdf-canvas.is-panning .textLayer {
+  pointer-events: none !important;
+}
+
 .hl-underline {
   position: absolute;
   pointer-events: none;
-  background: none;
-  border-bottom: 2px solid color-mix(in srgb, var(--color-hl-amber) 85%, transparent);
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--color-hl-amber) 85%, transparent);
   mix-blend-mode: multiply;
 }
-.hl-underline-green { border-bottom-color: color-mix(in srgb, var(--color-hl-green) 85%, transparent); }
-.hl-underline-blue { border-bottom-color: color-mix(in srgb, var(--color-hl-blue) 85%, transparent); }
-.hl-underline-rose { border-bottom-color: color-mix(in srgb, var(--color-hl-rose) 85%, transparent); }
-.hl-underline-violet { border-bottom-color: color-mix(in srgb, var(--color-hl-violet) 85%, transparent); }
-.hl-underline-neutral { border-bottom-color: color-mix(in srgb, var(--color-hl-neutral) 85%, transparent); }
-.hl-underline-amber { border-bottom-color: color-mix(in srgb, var(--color-hl-amber) 85%, transparent); }
+.hl-underline-green { background: color-mix(in srgb, var(--color-hl-green) 85%, transparent); }
+.hl-underline-blue { background: color-mix(in srgb, var(--color-hl-blue) 85%, transparent); }
+.hl-underline-rose { background: color-mix(in srgb, var(--color-hl-rose) 85%, transparent); }
+.hl-underline-violet { background: color-mix(in srgb, var(--color-hl-violet) 85%, transparent); }
+.hl-underline-neutral { background: color-mix(in srgb, var(--color-hl-neutral) 85%, transparent); }
+.hl-underline-amber { background: color-mix(in srgb, var(--color-hl-amber) 85%, transparent); }
 :root.dark .hl-underline {
   mix-blend-mode: screen;
 }
@@ -2418,6 +2467,30 @@ svg.block-menu-icon {
   color: var(--text-primary);
 }
 
+.lib-grip {
+  display: grid;
+  place-items: center;
+  width: 1.05rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  border-radius: var(--radius-small);
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: grab;
+}
+.lib-row:hover .lib-grip,
+.lib-row.is-selected .lib-grip,
+.lib-grip:focus-visible {
+  opacity: 1;
+}
+.lib-grip:active {
+  cursor: grabbing;
+}
+.lib-grip:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
 .lib-title-input {
   flex: 1;
   min-width: 0;
@@ -3475,6 +3548,25 @@ svg.block-menu-icon {
   background: var(--color-canvas);
   font-size: 12px;
 }
+.notes-tb-btn:disabled {
+  opacity: 0.35;
+  pointer-events: none;
+}
+.notes-tb-swatch-letter {
+  display: inline-block;
+  border-bottom: 2px solid currentColor;
+  line-height: 1;
+  padding-bottom: 1px;
+}
+.notes-find-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.7rem;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+}
 
 .confirm-layer {
   position: fixed;
@@ -3550,6 +3642,7 @@ svg.block-menu-icon {
 .page-mark-frame {
   position: absolute;
   inset: 0;
+  z-index: 2;
   pointer-events: none;
   border: 1px solid transparent;
 }
@@ -3558,10 +3651,15 @@ svg.block-menu-icon {
   cursor: grab;
   border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
-.hl-underline {
-  background: color-mix(in srgb, var(--color-hl-amber) 85%, transparent);
-  border-bottom: none;
-  mix-blend-mode: multiply;
+.page-mark-note.is-selected:not(.is-editing) .page-mark-frame:active {
+  cursor: grabbing;
+}
+.page-mark-note.is-editing .page-mark-text {
+  z-index: 3;
+  cursor: text;
+}
+.page-mark-note.is-selected:not(.is-editing) {
+  touch-action: none;
 }
 
 .ProseMirror [data-line-height='1'] { line-height: 1; }
@@ -3576,17 +3674,31 @@ svg.block-menu-icon {
 .ProseMirror [data-space-after='0.6em'] { margin-bottom: 0.6em; }
 
 @media print {
+  body * {
+    visibility: hidden !important;
+  }
+  .note-surface,
+  .note-surface * {
+    visibility: visible !important;
+  }
   .notes-toolbar,
   .notes-header,
   .notes-status,
+  .notes-find-bar,
   .revision-bar,
   .pdf-annot-bar,
-  .page-block-gutter {
+  .page-block-gutter,
+  .block-handle {
     display: none !important;
+    visibility: hidden !important;
   }
   .note-surface {
+    position: absolute !important;
+    inset: 0 !important;
     overflow: visible !important;
-    background: white;
+    height: auto !important;
+    background: white !important;
+    color: #1c1915 !important;
   }
 }
 

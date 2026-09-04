@@ -8,6 +8,7 @@ import {
   NOTE_LINE_SPACING,
 } from '@/features/editor/formatColors'
 import type { BlockAlign } from '@/features/notes/extensions/BlockDirection'
+import { Icon } from '@/features/shell/Icon'
 import { insertTableSafely } from '@/features/notes/insertHelpers'
 
 type Menu = null | 'style' | 'font' | 'size' | 'color' | 'highlight' | 'line' | 'insert' | 'dir' | 'more' | 'link'
@@ -67,11 +68,15 @@ export function NotesToolbar({
 
   const attrs = editor.getAttributes('paragraph')
   const heading = editor.getAttributes('heading')
-  const currentDir = (attrs.dir as string | null) ?? (heading.dir as string | null) ?? null
+  const dirLock = !!(attrs.dirLock ?? heading.dirLock)
+  const currentDir = dirLock ? ((attrs.dir as string | null) ?? (heading.dir as string | null) ?? null) : null
   const currentAlign = (attrs.textAlign as BlockAlign | null) ?? (heading.textAlign as BlockAlign | null) ?? null
   const currentSize = (editor.getAttributes('textStyle').fontSize as string | null) ?? ''
   const currentFont = (editor.getAttributes('textStyle').fontFamily as string | null) ?? ''
   const currentLine = (attrs.lineHeight as string | null) ?? (heading.lineHeight as string | null) ?? '1.5'
+  const currentColor = (editor.getAttributes('textStyle').color as string | undefined) || ''
+  const currentHighlight = (editor.getAttributes('highlight').color as string | undefined) || ''
+  const currentHref = (editor.getAttributes('link').href as string | undefined) || ''
 
   const Btn = ({
     active,
@@ -111,10 +116,10 @@ export function NotesToolbar({
     <div ref={barRef} className="notes-toolbar" role="toolbar" aria-label="Document formatting">
       <div className="notes-tb-group" aria-label="History">
         <Btn title="Undo  Ctrl+Z" disabled={!editor.can().undo()} onClick={() => run(() => editor.chain().undo().run())}>
-          ↺
+          <Icon name="undo" className="h-3.5 w-3.5" />
         </Btn>
         <Btn title="Redo  Ctrl+Shift+Z" disabled={!editor.can().redo()} onClick={() => run(() => editor.chain().redo().run())}>
-          ↻
+          <Icon name="redo" className="h-3.5 w-3.5" />
         </Btn>
       </div>
 
@@ -132,8 +137,6 @@ export function NotesToolbar({
           <div className="notes-tb-menu" role="menu">
             {[
               { label: 'Normal', run: () => editor.chain().setParagraph().run() },
-              { label: 'Title', run: () => editor.chain().setHeading({ level: 1 }).run() },
-              { label: 'Subtitle', run: () => editor.chain().setHeading({ level: 2 }).run() },
               { label: 'Heading 1', run: () => editor.chain().setHeading({ level: 1 }).run() },
               { label: 'Heading 2', run: () => editor.chain().setHeading({ level: 2 }).run() },
               { label: 'Heading 3', run: () => editor.chain().setHeading({ level: 3 }).run() },
@@ -230,8 +233,10 @@ export function NotesToolbar({
       </div>
 
       <div className="notes-tb-group" aria-label="Colour">
-        <Btn title="Text colour" active={menu === 'color'} onClick={() => setMenu((m) => (m === 'color' ? null : 'color'))}>
-          A
+        <Btn title="Text colour" active={menu === 'color' || !!currentColor} onClick={() => setMenu((m) => (m === 'color' ? null : 'color'))}>
+          <span className="notes-tb-swatch-letter" style={{ borderBottomColor: currentColor || 'currentColor' }}>
+            A
+          </span>
         </Btn>
         {menu === 'color' && (
           <div className="notes-tb-menu" role="menu" aria-label="Text colour">
@@ -249,8 +254,10 @@ export function NotesToolbar({
             ))}
           </div>
         )}
-        <Btn title="Highlight colour" active={menu === 'highlight'} onClick={() => setMenu((m) => (m === 'highlight' ? null : 'highlight'))}>
-          ▮
+        <Btn title="Highlight colour" active={menu === 'highlight' || !!currentHighlight} onClick={() => setMenu((m) => (m === 'highlight' ? null : 'highlight'))}>
+          <span className="notes-tb-swatch-letter" style={{ background: currentHighlight || 'transparent' }}>
+            ▮
+          </span>
         </Btn>
         {menu === 'highlight' && (
           <div className="notes-tb-menu" role="menu" aria-label="Highlight colour">
@@ -275,7 +282,7 @@ export function NotesToolbar({
       </div>
 
       <div className="notes-tb-group" aria-label="Paragraph">
-        <Btn title="Align start" active={currentAlign === 'start' || currentAlign == null} onClick={() => run(() => editor.chain().setBlockAlign('start').run())}>
+        <Btn title="Align start" active={currentAlign === 'start'} onClick={() => run(() => editor.chain().setBlockAlign('start').run())}>
           ⇤
         </Btn>
         <Btn title="Centre" active={currentAlign === 'center'} onClick={() => run(() => editor.chain().setBlockAlign('center').run())}>
@@ -347,7 +354,7 @@ export function NotesToolbar({
         </Btn>
         {menu === 'insert' && (
           <div className="notes-tb-menu" role="menu">
-            <button type="button" className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => { setLinkValue((editor.getAttributes('link').href as string) ?? ''); setMenu('link') }}>
+            <button type="button" className={`block-menu-item${currentHref ? ' text-accent' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => { setLinkValue(currentHref); setMenu('link') }}>
               Link
             </button>
             <button type="button" className="block-menu-item" onMouseDown={(e) => e.preventDefault()} onClick={() => imageRef.current?.click()}>
@@ -425,8 +432,8 @@ export function NotesToolbar({
       </div>
 
       <div className="notes-tb-group" aria-label="Direction">
-        <Btn title="Automatic direction" active={currentDir == null} onClick={() => run(() => editor.chain().setBlockDirection(null).run())}>
-          ↺
+        <Btn title="Automatic direction" active={!dirLock} onClick={() => run(() => editor.chain().setBlockDirection(null).run())}>
+          Auto
         </Btn>
         <Btn title="Left to right" active={currentDir === 'ltr'} onClick={() => run(() => editor.chain().setBlockDirection('ltr').run())}>
           A
@@ -449,9 +456,12 @@ export function NotesToolbar({
         <Btn
           title="Paste as plain text"
           onClick={() => {
-            void navigator.clipboard.readText().then((text) => {
-              run(() => editor.chain().insertContent(text).run())
-            })
+            void navigator.clipboard
+              .readText()
+              .then((text) => {
+                if (text) run(() => editor.chain().insertContent(text).run())
+              })
+              .catch(() => undefined)
           }}
         >
           Plain

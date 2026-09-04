@@ -32,8 +32,40 @@ export interface BlockDeleteSnapshot {
   selectAfter: string | null
 }
 
-function displayTitle(title: string): string {
-  return title.trim() || 'Untitled'
+const SUBSTANTIAL_NODE_TYPES = new Set([
+  'sourceQuote',
+  'imageBlock',
+  'image',
+  'quranBlock',
+  'hadithBlock',
+  'table',
+])
+
+/** True when a Tiptap document holds more than an empty paragraph shell. */
+export function tiptapDocHasSubstance(doc: unknown): boolean {
+  if (!doc || typeof doc !== 'object') return false
+  const walk = (node: Record<string, unknown>): boolean => {
+    const type = node.type
+    if (typeof type === 'string' && SUBSTANTIAL_NODE_TYPES.has(type)) return true
+    if (typeof node.text === 'string' && node.text.trim().length > 0) return true
+    const content = node.content
+    if (!Array.isArray(content)) return false
+    return content.some((child) => child && typeof child === 'object' && walk(child as Record<string, unknown>))
+  }
+  return walk(doc as Record<string, unknown>)
+}
+
+export function displayLibraryTitle(latin?: string | null, arabic?: string | null): string {
+  return (latin ?? '').trim() || (arabic ?? '').trim() || 'this item'
+}
+
+function deletionDetail(flags: { hasNotes: boolean; hasPdf: boolean; hasCaptures: boolean; nestedCount: number }): string {
+  const bits: string[] = []
+  if (flags.hasNotes) bits.push('Their notes will be deleted.')
+  if (flags.hasPdf) bits.push('The PDF itself is kept.')
+  if (flags.hasCaptures) bits.push('Source excerpts stored in those notes will be removed with them.')
+  if (flags.nestedCount > 0 && bits.length === 0) bits.push('Nested items will be removed.')
+  return bits.join(' ')
 }
 
 export async function inspectNodeDeletion(id: string): Promise<DeleteImpact | null> {
@@ -42,29 +74,22 @@ export async function inspectNodeDeletion(id: string): Promise<DeleteImpact | nu
   const descendants = await libraryRepo.descendants(id)
   const all = [node, ...descendants]
   const noteIds = all.map((row) => row.noteId).filter((value): value is string => !!value)
-  const notes = (
-    await Promise.all(noteIds.map((noteId) => db.notes.get(noteId)))
-  ).filter((row): row is Note => !!row)
   const docs = (
     await Promise.all(noteIds.map((noteId) => db.noteDocs.get(noteId)))
   ).filter((row): row is NoteDoc => !!row)
   const quoteCounts = await Promise.all(noteIds.map((noteId) => db.quoteRefs.where('noteId').equals(noteId).count()))
-  const hasNotes = notes.length > 0
+  const hasNotes = docs.some((doc) => tiptapDocHasSubstance(doc.doc))
   const hasPdf = all.some((row) => !!row.bookId)
-  const hasCaptures = quoteCounts.some((count) => count > 0) || docs.some((doc) => {
-    if (!doc || typeof doc.doc !== 'object' || !doc.doc) return false
-    return JSON.stringify(doc.doc).includes('sourceQuote')
-  })
-  const hasContent = hasNotes || hasPdf || hasCaptures || descendants.length > 0 || !!node.title.trim()
+  const hasCaptures =
+    quoteCounts.some((count) => count > 0) ||
+    docs.some((doc) => typeof doc.doc === 'object' && doc.doc && JSON.stringify(doc.doc).includes('sourceQuote'))
   const nestedCount = descendants.length
-  const title = displayTitle(node.title)
+  const hasContent = hasNotes || hasPdf || hasCaptures || nestedCount > 0 || !!node.title.trim() || !!node.arabicTitle?.trim()
+  const title = displayLibraryTitle(node.title, node.arabicTitle)
   const summary =
     nestedCount > 0
       ? `Delete “${title}” and its ${nestedCount} nested item${nestedCount === 1 ? '' : 's'}?`
       : `Delete “${title}”?`
-  const bits = ['Their notes will be deleted.']
-  if (hasPdf) bits.push('The PDF itself is kept.')
-  if (hasCaptures) bits.push('Source excerpts stored in those notes will be removed with them.')
   return {
     id,
     title,
@@ -75,7 +100,7 @@ export async function inspectNodeDeletion(id: string): Promise<DeleteImpact | nu
     hasContent,
     needsConfirm: nestedCount > 0 || hasNotes || hasPdf || hasCaptures,
     summary,
-    detail: bits.join(' '),
+    detail: deletionDetail({ hasNotes, hasPdf, hasCaptures, nestedCount }),
   }
 }
 
@@ -84,8 +109,9 @@ export async function inspectBlockDeletion(id: string): Promise<DeleteImpact | n
   if (!block) return null
   const descendants = await libraryBlocksRepo.descendants(id)
   const nestedCount = descendants.length
-  const hasContent = !!(block.content.trim() || block.libraryNodeId || block.targetPageId || nestedCount)
-  const title = displayTitle(block.content)
+  const linked = !!(block.libraryNodeId || block.targetPageId)
+  const hasContent = !!(block.content.trim() || linked || nestedCount)
+  const title = displayLibraryTitle(block.content)
   const summary =
     nestedCount > 0
       ? `Delete “${title}” and its ${nestedCount} nested item${nestedCount === 1 ? '' : 's'}?`
@@ -98,9 +124,14 @@ export async function inspectBlockDeletion(id: string): Promise<DeleteImpact | n
     hasPdf: false,
     hasCaptures: false,
     hasContent,
-    needsConfirm: nestedCount > 0 || hasContent,
+    needsConfirm: nestedCount > 0 || linked,
     summary,
-    detail: nestedCount > 0 ? 'Nested library rows on this page will be removed.' : 'This row will be removed from the Library page.',
+    detail:
+      nestedCount > 0
+        ? 'Nested library rows on this page will be removed.'
+        : linked
+          ? 'This row is linked to a study item or page.'
+          : '',
   }
 }
 
@@ -138,6 +169,10 @@ export async function restoreNodeDeletion(snapshot: NodeDeleteSnapshot): Promise
   })
 }
 
+function isOrganiser(type: LibraryNode['type']): boolean {
+  return type === 'science' || type === 'folder'
+}
+
 export async function deleteLibraryNode(id: string): Promise<NodeDeleteSnapshot | null> {
   const snapshot = await snapshotNodeDeletion(id)
   if (!snapshot) return null
@@ -147,9 +182,9 @@ export async function deleteLibraryNode(id: string): Promise<NodeDeleteSnapshot 
     if (!snapshot.selectAfter) library.showLibrary()
     else {
       const next = await libraryRepo.get(snapshot.selectAfter)
-      if (!next) library.showLibrary()
-      else if (next.type === 'science' || next.type === 'folder') {
-        useLibraryStore.setState({ activeNodeId: next.id })
+      if (!next || isOrganiser(next.type)) {
+        useStudyStore.getState().closeBook()
+        library.showLibrary()
       } else {
         await library.openNode(snapshot.selectAfter)
       }
@@ -159,7 +194,8 @@ export async function deleteLibraryNode(id: string): Promise<NodeDeleteSnapshot 
   const removedNotes = new Set(snapshot.notes.map((note) => note.id))
   if (study.activeNoteId && removedNotes.has(study.activeNoteId)) {
     const next = snapshot.selectAfter ? await libraryRepo.get(snapshot.selectAfter) : null
-    study.setActiveNote(next?.noteId ?? null)
+    if (!next || isOrganiser(next.type)) study.setActiveNote(null)
+    else study.setActiveNote(next.noteId ?? null)
   }
   return snapshot
 }

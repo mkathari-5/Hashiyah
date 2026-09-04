@@ -7,6 +7,7 @@ export function ConfirmDialog({
   confirmLabel = 'Delete',
   cancelLabel = 'Cancel',
   danger = true,
+  initialFocus,
   children,
   onConfirm,
   onCancel,
@@ -16,14 +17,26 @@ export function ConfirmDialog({
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
+  /** Dangerous deletes focus Cancel so Enter after a menu cannot confirm. */
+  initialFocus?: 'cancel' | 'confirm' | 'first-input'
   children?: React.ReactNode
   onConfirm: () => void
   onCancel: () => void
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null)
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const focus =
+    initialFocus ?? (children ? 'first-input' : danger ? 'cancel' : 'confirm')
 
   useEffect(() => {
-    confirmRef.current?.focus()
+    if (focus === 'first-input') {
+      dialogRef.current?.querySelector<HTMLElement>('input, textarea, [contenteditable="true"]')?.focus()
+    } else if (focus === 'cancel') {
+      cancelRef.current?.focus()
+    } else {
+      confirmRef.current?.focus()
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
@@ -32,19 +45,25 @@ export function ConfirmDialog({
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onCancel])
+  }, [onCancel, focus])
 
   return createPortal(
     <div className="confirm-layer" role="presentation">
       <button type="button" className="confirm-backdrop" aria-label="Cancel" onClick={onCancel} />
-      <div role="dialog" aria-modal="true" aria-labelledby="confirm-title" className="confirm-dialog">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        className="confirm-dialog"
+      >
         <h2 id="confirm-title" className="confirm-title">
           {title}
         </h2>
         {body ? <p className="confirm-body">{body}</p> : null}
         {children}
         <div className="confirm-actions">
-          <button type="button" className="ui-btn" onClick={onCancel}>
+          <button ref={cancelRef} type="button" className="ui-btn" onClick={onCancel}>
             {cancelLabel}
           </button>
           <button

@@ -23,6 +23,7 @@ import { SlashCommand } from '@/features/notes/extensions/SlashCommand'
 import { SourceGroup } from '@/features/notes/extensions/SourceGroup'
 import { SourceQuote } from '@/features/notes/extensions/SourceQuote'
 import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/extensions/Toggle'
+import { findBlockPos, openAncestorToggles } from '@/features/notes/extensions/toggleOutline'
 import { WikiLink, handleWikiLinkClick } from '@/features/notes/extensions/WikiLink'
 import {
   applyToggleStates,
@@ -122,11 +123,27 @@ function applyStatesToDocument(editor: Editor, states: Record<string, boolean>) 
   if (changed) editor.view.dispatch(tr)
 }
 
+function revealEditorBlock(editor: Editor, scrollRoot: HTMLElement | null, blockId: string) {
+  const pos = findBlockPos(editor.state, blockId)
+  if (pos !== null) {
+    const tr = openAncestorToggles(editor.state, pos)
+    if (tr) editor.view.dispatch(tr)
+  }
+  requestAnimationFrame(() => {
+    const el = scrollRoot?.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('block-pulse')
+    window.setTimeout(() => el.classList.remove('block-pulse'), 1200)
+  })
+}
+
 export interface NoteEditorHandle {
   outline: () => OutlineEntry[]
   jumpToBlock: (blockId: string) => void
   collapseAll: (collapsed: boolean) => void
   openFind: () => void
+  openReplace: () => void
   focus: () => void
 }
 
@@ -148,6 +165,8 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   const clearInsert = useNotesStore((s) => s.clearInsert)
   const pendingScroll = useNotesStore((s) => s.pendingScroll)
   const clearScroll = useNotesStore((s) => s.clearScroll)
+  const pendingFind = useNotesStore((s) => s.pendingFind)
+  const clearFind = useNotesStore((s) => s.clearFind)
   const revisionMode = useNotesStore((s) => isRevising(s, noteId))
   const captureRevisionStates = useNotesStore((s) => s.captureRevisionStates)
   const endRevisionElsewhere = useNotesStore((s) => s.endRevisionElsewhere)
@@ -343,15 +362,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   // ── Scroll to a block, from the sidebar outline or a search result ────────
   useEffect(() => {
     if (!editor || !pendingScroll || loadedNoteId !== pendingScroll.noteId) return
-
-    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-block-id="${pendingScroll.blockId}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      // A brief pulse so the eye lands on the right block; the note itself is
-      // never modified by navigating to it.
-      el.classList.add('block-pulse')
-      window.setTimeout(() => el.classList.remove('block-pulse'), 1200)
-    }
+    revealEditorBlock(editor, scrollRef.current, pendingScroll.blockId)
     clearScroll()
   }, [editor, pendingScroll, loadedNoteId, clearScroll])
 
@@ -397,27 +408,27 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
 
   // ── Find within note ──────────────────────────────────────────────────────
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'f' || event.shiftKey) return
-      if (!editor?.isFocused && !scrollRef.current?.contains(document.activeElement)) return
-      event.preventDefault()
-      setFindOpen(true)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [editor])
+    if (!pendingFind || loadedNoteId !== noteId) return
+    setFindReplace(pendingFind.replace)
+    setFindOpen(true)
+    clearFind()
+  }, [pendingFind, loadedNoteId, noteId, clearFind])
 
   useImperativeHandle(
     ref,
     () => ({
       outline: () => (editor ? collectOutline(editor.getJSON()) : []),
       jumpToBlock: (blockId) => {
-        const el = scrollRef.current?.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)
-        el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        if (!editor) return
+        revealEditorBlock(editor, scrollRef.current, blockId)
       },
       collapseAll: (collapsed) => editor?.commands.setAllTogglesOpen(!collapsed),
       openFind: () => {
         setFindReplace(false)
+        setFindOpen(true)
+      },
+      openReplace: () => {
+        setFindReplace(true)
         setFindOpen(true)
       },
       focus: () => editor?.view.focus(),

@@ -9,7 +9,11 @@ export function MarkStyleBar({
   onChange: (patch: Partial<PageMarkStyle>) => void
 }) {
   return (
-    <div className="mark-style-bar" role="toolbar" aria-label="Text annotation style" onPointerDown={(e) => e.stopPropagation()}>
+    <div className="mark-style-bar" role="toolbar" aria-label="Text annotation style" onPointerDown={(e) => {
+      e.stopPropagation()
+      const tag = (e.target as HTMLElement).tagName
+      if (tag !== 'SELECT' && tag !== 'INPUT') e.preventDefault()
+    }}>
       <label className="mark-style-field">
         <span className="sr-only">Font size</span>
         <select

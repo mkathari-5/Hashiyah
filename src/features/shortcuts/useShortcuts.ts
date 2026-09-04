@@ -4,6 +4,7 @@ import { isTypingContext } from '@/features/shortcuts/typingContext'
 import { extractAndExplain, quickNoteAtCurrentPosition } from '@/services/notes/extract'
 import { redoMarkHistory, undoMarkHistory } from '@/services/annotations/history'
 import { useAppStore } from '@/state/useAppStore'
+import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { AnnotationKind } from '@/types'
 
@@ -83,6 +84,7 @@ export function useShortcuts() {
           study.setPdfTool('select')
           study.setSelection(null)
           study.setSelectedMarkId(null)
+          study.setAnnotationGesture(false)
           return
         }
         if ((event.key === 'Delete' || event.key === 'Backspace') && (study.selectedMarkId || study.activeAnnotationId)) {
@@ -125,6 +127,13 @@ export function useShortcuts() {
       if (event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault()
         app.setSearchOpen(true)
+        return
+      }
+      if (!event.shiftKey && (event.key === 'f' || event.key === 'F')) {
+        if (study.activeNoteId) {
+          event.preventDefault()
+          useNotesStore.getState().requestFind(false)
+        }
         return
       }
       if (event.key === '/') {

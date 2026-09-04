@@ -181,7 +181,7 @@ export function NotesPanel() {
           {!revisionMode && (
             <button
               onClick={() => activeNoteId && setRevisionMode(activeNoteId, true)}
-              aria-pressed={false}
+              aria-pressed={revisionMode}
               title="Revision mode — collapse everything and work through it"
               className="notes-action is-labelled"
             >
@@ -194,6 +194,7 @@ export function NotesPanel() {
             onClick={() => setOutlineOpen((v) => !v)}
             title="Outline"
             aria-label="Outline"
+            aria-expanded={outlineOpen}
             className="notes-action"
           >
             <Icon name="list" className="h-3.5 w-3.5" />
@@ -354,7 +355,7 @@ export function NotesPanel() {
       <footer className="notes-status">
         <span>{saving ? 'Saving…' : savedLabel ? 'Saved' : ''}</span>
         <span className="ms-auto tabular-nums">
-          {words ? `${words} words · ${characters} characters` : ''}
+          {`${words} words · ${characters} characters`}
         </span>
       </footer>
 

@@ -268,3 +268,32 @@ export function exitToggleBody(
   if (dispatch) dispatch(tr)
   return true
 }
+
+export function findBlockPos(state: EditorState, blockId: string): number | null {
+  let found: number | null = null
+  state.doc.descendants((node, pos) => {
+    if (found !== null) return false
+    if (node.attrs.blockId === blockId) {
+      found = pos
+      return false
+    }
+    return true
+  })
+  return found
+}
+
+/** Open every collapsed toggle that wraps `pos`, so a hidden block can be revealed. */
+export function openAncestorToggles(state: EditorState, pos: number): Transaction | null {
+  if (pos < 0 || pos > state.doc.content.size) return null
+  const $pos = state.doc.resolve(Math.min(pos + 1, state.doc.content.size))
+  const tr = state.tr
+  let changed = false
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth)
+    if (node.type.name === 'toggleBlock' && node.attrs.open === false) {
+      tr.setNodeAttribute($pos.before(depth), 'open', true)
+      changed = true
+    }
+  }
+  return changed ? tr : null
+}

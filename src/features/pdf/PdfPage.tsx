@@ -3,6 +3,13 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { recordMarkCreated } from '@/services/annotations/history'
 import { pagesRepo } from '@/db/repos/documents'
 import { applySelectionMarkup, createTrackedMark, deleteAnnotationMark } from '@/features/pdf/annotationActions'
+import {
+  isPdfGlyphTarget,
+  markupPointerDownIntent,
+  markupPointerUpAction,
+  pointerDistance,
+  type MarkupIntent,
+} from '@/features/pdf/pdfToolBehavior'
 import { OcrTextLayer } from '@/features/pdf/OcrTextLayer'
 import { normalizeForSearch } from '@/lib/arabic'
 import { pageId } from '@/lib/id'
@@ -58,7 +65,11 @@ export function PdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
   const ctxRef = useRef<PageTextContext | null>(null)
-  const dragStart = useRef<{ x: number; y: number } | null>(null)
+  const markupGesture = useRef<{
+    kind: MarkupIntent
+    pointerId: number
+    start: { x: number; y: number }
+  } | null>(null)
   const [textReady, setTextReady] = useState(false)
   const [height, setHeight] = useState(() => Math.round(width * aspect))
   const [useOcrOverlay, setUseOcrOverlay] = useState(false)
@@ -246,37 +257,96 @@ export function PdfPage({
     return { left: box.left, top: box.top, width: box.width, height: box.height }
   }
 
+  useEffect(() => {
+    markupGesture.current = null
+    setDraftRect(null)
+    pageRef.current?.classList.remove('is-drawing-markup')
+  }, [pdfTool])
+
+  const commitDrawnMark = (kind: 'area' | 'line', start: { x: number; y: number }, end: { x: number; y: number }) => {
+    const box = pageBox()
+    if (!box) return
+    if (kind === 'line') {
+      const from = clientToNormalized(start, box, rotation)
+      const to = clientToNormalized(end, box, rotation)
+      const rect = horizontalLineFromDrag(from, to)
+      if (rect.w < 0.012) return
+      void createTrackedMark({
+        bookId,
+        documentId,
+        pageNumber,
+        kind: 'line',
+        rect,
+        pageRotation: rotation,
+        pageWidth: pageRecord?.width ?? pdfPageWidth,
+        pageHeight: pageRecord?.height ?? pdfPageHeight,
+        style: { strokeColor: '#6b5344', strokeWidth: 2 },
+      }).then((created) => recordMarkCreated(created))
+      return
+    }
+    const rect = clientRectToNormalized(start, end, box, rotation, { clamp: true, minSize: 0.012 })
+    if (!rect) return
+    void createTrackedMark({
+      bookId,
+      documentId,
+      pageNumber,
+      kind: 'area',
+      rect,
+      pageRotation: rotation,
+      pageWidth: pageRecord?.width ?? pdfPageWidth,
+      pageHeight: pageRecord?.height ?? pdfPageHeight,
+      style: { fillColor: '#d8a13d', fillOpacity: 0.28 },
+    }).then((created) => recordMarkCreated(created))
+  }
+
   const handlePointerDown = (event: React.PointerEvent) => {
     if (event.button !== 0) return
-    dragStart.current = { x: event.clientX, y: event.clientY }
-    setDraftRect(null)
-    if (pdfTool === 'highlight' || pdfTool === 'underline') {
-      event.currentTarget.setPointerCapture(event.pointerId)
+    if (event.currentTarget.closest('.pdf-canvas.is-panning')) return
+    if (pdfTool === 'text' || pdfTool === 'pan') return
+
+    const study = useStudyStore.getState()
+    if (study.selectedMarkId || study.editingMarkId) {
+      study.setSelectedMarkId(null)
+      study.setEditingMarkId(null)
     }
+
+    setDraftRect(null)
+
+    const intent = markupPointerDownIntent(pdfTool, isPdfGlyphTarget(event.target))
+    if (!intent) return
+    markupGesture.current = { kind: intent, pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY } }
+    if (intent === 'select-text') return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.currentTarget.classList.add('is-drawing-markup')
+    study.setAnnotationGesture(true)
   }
 
   const handlePointerMove = (event: React.PointerEvent) => {
-    if (!dragStart.current || (pdfTool !== 'highlight' && pdfTool !== 'underline')) return
+    const gesture = markupGesture.current
+    if (!gesture || gesture.kind === 'select-text') return
     const box = pageBox()
     if (!box) return
-    if (pdfTool === 'underline') {
-      const start = clientToNormalized(dragStart.current, box, rotation)
+    if (gesture.kind === 'draw-line') {
+      const start = clientToNormalized(gesture.start, box, rotation)
       const end = clientToNormalized({ x: event.clientX, y: event.clientY }, box, rotation)
       setDraftRect(horizontalLineFromDrag(start, end))
       return
     }
-    const rect = clientRectToNormalized(dragStart.current, { x: event.clientX, y: event.clientY }, box, rotation, {
+    const rect = clientRectToNormalized(gesture.start, { x: event.clientX, y: event.clientY }, box, rotation, {
       clamp: true,
       minSize: 0.008,
     })
     setDraftRect(rect)
   }
 
-  const handlePointerUp = useCallback(
-    (event: React.PointerEvent) => {
-      const start = dragStart.current
-      dragStart.current = null
+  const handlePointerUp = (event: React.PointerEvent) => {
+      const gesture = markupGesture.current
+      markupGesture.current = null
       setDraftRect(null)
+      pageRef.current?.classList.remove('is-drawing-markup')
+      useStudyStore.getState().setAnnotationGesture(false)
+
       const ctx = ctxRef.current
       const selection = window.getSelection()
       const box = pageBox()
@@ -294,71 +364,48 @@ export function PdfPage({
         return
       }
 
-      if (selection && !selection.isCollapsed && ctx) {
-        const capture = captureSelection(selection, ctx)
-        if (capture) {
-          const live = {
-            capture,
-            documentId,
-            bookId,
-            menuLeft: event.clientX,
-            menuTop: event.clientY,
+      if (gesture) {
+        const hasText = Boolean(selection && !selection.isCollapsed && ctx)
+        const action = markupPointerUpAction({
+          intent: gesture.kind,
+          hasTextSelection: hasText,
+          dragDistance: pointerDistance(gesture.start, { x: event.clientX, y: event.clientY }),
+        })
+        if (action === 'apply-text' && selection && ctx) {
+          const capture = captureSelection(selection, ctx)
+          if (capture) {
+            void applySelectionMarkup(pdfTool === 'underline' ? 'underline' : 'highlight', {
+              capture,
+              documentId,
+              bookId,
+              menuLeft: event.clientX,
+              menuTop: event.clientY,
+            })
           }
-          if (pdfTool === 'highlight') {
-            void applySelectionMarkup('highlight', live)
-            return
-          }
-          if (pdfTool === 'underline') {
-            void applySelectionMarkup('underline', live)
-            return
-          }
-          const rects = selection.getRangeAt(0).getClientRects()
-          const last = rects[rects.length - 1]
-          setSelection({
-            ...live,
-            menuLeft: last ? last.left + last.width / 2 : event.clientX,
-            menuTop: last ? last.top : event.clientY,
+          return
+        }
+        if (action === 'commit-draw') {
+          commitDrawnMark(gesture.kind === 'draw-line' ? 'line' : 'area', gesture.start, {
+            x: event.clientX,
+            y: event.clientY,
           })
           return
         }
+        return
       }
 
-      if (start && box && (pdfTool === 'highlight' || pdfTool === 'underline')) {
-        if (pdfTool === 'underline') {
-          const from = clientToNormalized(start, box, rotation)
-          const to = clientToNormalized({ x: event.clientX, y: event.clientY }, box, rotation)
-          const rect = horizontalLineFromDrag(from, to)
-          if (rect.w >= 0.012) {
-            void createTrackedMark({
-              bookId,
-              documentId,
-              pageNumber,
-              kind: 'line',
-              rect,
-              pageRotation: rotation,
-              pageWidth: pageRecord?.width ?? pdfPageWidth,
-              pageHeight: pageRecord?.height ?? pdfPageHeight,
-              style: { strokeColor: '#6b5344', strokeWidth: 2 },
-            }).then((created) => recordMarkCreated(created))
-          }
-          return
-        }
-        const rect = clientRectToNormalized(start, { x: event.clientX, y: event.clientY }, box, rotation, {
-          clamp: true,
-          minSize: 0.012,
-        })
-        if (rect) {
-          void createTrackedMark({
-            bookId,
+      if (selection && !selection.isCollapsed && ctx && pdfTool === 'select') {
+        const capture = captureSelection(selection, ctx)
+        if (capture) {
+          const rects = selection.getRangeAt(0).getClientRects()
+          const last = rects[rects.length - 1]
+          setSelection({
+            capture,
             documentId,
-            pageNumber,
-            kind: 'area',
-            rect,
-            pageRotation: rotation,
-            pageWidth: pageRecord?.width ?? pdfPageWidth,
-            pageHeight: pageRecord?.height ?? pdfPageHeight,
-            style: { fillColor: '#d8a13d', fillOpacity: 0.28 },
-          }).then((created) => recordMarkCreated(created))
+            bookId,
+            menuLeft: last ? last.left + last.width / 2 : event.clientX,
+            menuTop: last ? last.top : event.clientY,
+          })
           return
         }
       }
@@ -378,23 +425,7 @@ export function PdfPage({
       } else {
         setActiveAnnotation(null)
       }
-    },
-    [
-      documentId,
-      bookId,
-      highlights,
-      setSelection,
-      setActiveAnnotation,
-      requestReveal,
-      pdfTool,
-      rotation,
-      pageNumber,
-      pageRecord?.width,
-      pageRecord?.height,
-      pdfPageWidth,
-      pdfPageHeight,
-    ],
-  )
+    }
 
   useEffect(() => {
     const el = pageRef.current
@@ -411,12 +442,7 @@ export function PdfPage({
 
   const ocrWords = pageRecord?.ocrWords ?? []
   const showOcr = useOcrOverlay && ocrWords.length > 0 && pageRecord?.textSource === 'ocr'
-  const toolClass =
-    pdfTool === 'text' || pdfTool === 'pan' || pdfTool === 'erase'
-      ? `is-tool-${pdfTool}`
-      : pdfTool === 'highlight' || pdfTool === 'underline'
-        ? `is-tool-${pdfTool}`
-        : ''
+  const toolClass = `is-tool-${pdfTool}`
 
   return (
     <div

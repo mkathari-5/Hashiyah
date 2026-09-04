@@ -1,12 +1,15 @@
 import Dexie from 'dexie'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { db } from '@/db/db'
+import { libraryBlocksRepo, libraryPagesRepo } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { notesRepo } from '@/db/repos/notes'
 import {
   deleteLibraryNode,
+  inspectBlockDeletion,
   inspectNodeDeletion,
   restoreNodeDeletion,
+  tiptapDocHasSubstance,
 } from '@/features/library/libraryDelete'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import { useStudyStore } from '@/state/useStudyStore'
@@ -123,6 +126,77 @@ describe('library deletion', () => {
     expect(await libraryRepo.get(chapter.id)).toBeUndefined()
     expect(await libraryRepo.get(root.id)).toBeTruthy()
     expect(snapshot?.selectAfter).toBe(root.id)
-    expect(useLibraryStore.getState().activeNodeId).toBe(root.id)
+    expect(useLibraryStore.getState().activeNodeId).toBeNull()
+    expect(useStudyStore.getState().bookId).toBeNull()
+  })
+
+  it('does not confirm deletion of a node whose auto-created note is empty', async () => {
+    const note = await notesRepo.create({ bookId: null, title: 'Scratch — notes' })
+    const node = await libraryRepo.create({
+      parentId: null,
+      type: 'chapter',
+      title: 'Scratch',
+      noteId: note.id,
+    })
+    const impact = await inspectNodeDeletion(node.id)
+    expect(impact?.hasNotes).toBe(false)
+    expect(impact?.needsConfirm).toBe(false)
+    expect(impact?.detail).not.toContain('notes will be deleted')
+  })
+
+  it('uses the Arabic title when the Latin title is empty', async () => {
+    const node = await libraryRepo.create({
+      parentId: null,
+      type: 'chapter',
+      title: 'placeholder',
+      arabicTitle: 'الأصول الثلاثة',
+    })
+    await libraryRepo.update(node.id, { title: '' })
+    const impact = await inspectNodeDeletion(node.id)
+    expect(impact?.title).toBe('الأصول الثلاثة')
+    expect(impact?.summary).toContain('الأصول الثلاثة')
+    expect(impact?.summary).not.toContain('Untitled')
+  })
+
+  it('does not confirm deleting a titled library page leaf', async () => {
+    const page = await libraryPagesRepo.ensureRoot()
+    const block = await libraryBlocksRepo.create({
+      pageId: page.id,
+      type: 'text',
+      content: 'A note to myself',
+    })
+    const impact = await inspectBlockDeletion(block.id)
+    expect(impact?.needsConfirm).toBe(false)
+    expect(impact?.hasContent).toBe(true)
+  })
+
+  it('confirms deleting a nested or linked library page row', async () => {
+    const page = await libraryPagesRepo.ensureRoot()
+    const parent = await libraryBlocksRepo.create({ pageId: page.id, type: 'toggle', content: 'Branch' })
+    await libraryBlocksRepo.create({
+      pageId: page.id,
+      parentBlockId: parent.id,
+      type: 'text',
+      content: 'Nested',
+    })
+    const nested = await inspectBlockDeletion(parent.id)
+    expect(nested?.needsConfirm).toBe(true)
+    const study = await libraryBlocksRepo.create({
+      pageId: page.id,
+      type: 'study',
+      content: 'Open this',
+      libraryNodeId: 'node_linked',
+    })
+    expect((await inspectBlockDeletion(study.id))?.needsConfirm).toBe(true)
+  })
+
+  it('treats empty Tiptap shells as empty', () => {
+    expect(tiptapDocHasSubstance({ type: 'doc', content: [{ type: 'paragraph' }] })).toBe(false)
+    expect(
+      tiptapDocHasSubstance({
+        type: 'doc',
+        content: [{ type: 'paragraph', content: [{ type: 'text', text: 'شرح' }] }],
+      }),
+    ).toBe(true)
   })
 })

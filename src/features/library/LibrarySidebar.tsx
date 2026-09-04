@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { noteDocsRepo } from '@/db/repos/notes'
 import {
   deleteLibraryNode,
+  displayLibraryTitle,
   inspectNodeDeletion,
   restoreNodeDeletion,
   type DeleteImpact,
@@ -18,12 +19,15 @@ import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { LibraryNode } from '@/types'
 
+const UNDO_MS = 8000
+
 export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   const showLibrary = useLibraryStore((s) => s.showLibrary)
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
   const requestScrollTo = useNotesStore((s) => s.requestScrollTo)
   const [menu, setMenu] = useState<{ node: LibraryNode; x: number; y: number } | null>(null)
   const [renameRequest, setRenameRequest] = useState<{ id: string; arabic?: boolean } | null>(null)
+  const [writeRequest, setWriteRequest] = useState<{ parentId: string } | null>(null)
   const [confirm, setConfirm] = useState<DeleteImpact | null>(null)
   const [undo, setUndo] = useState<{ label: string; restore: () => Promise<void> } | null>(null)
 
@@ -40,14 +44,23 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
   const outlineKey = JSON.stringify(outlineRaw)
   const outline = useMemo(() => outlineRaw, [outlineKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!undo) return
+    const timer = window.setTimeout(() => setUndo(null), UNDO_MS)
+    return () => window.clearTimeout(timer)
+  }, [undo])
+
   const runDelete = async (impact: DeleteImpact) => {
     const snapshot = await deleteLibraryNode(impact.id)
     if (!snapshot) return
+    const restored = snapshot.nodes[0]
     setUndo({
       label: `Deleted “${impact.title}”`,
       restore: async () => {
         await restoreNodeDeletion(snapshot)
-        if (snapshot.selectAfter) await useLibraryStore.getState().openNode(snapshot.selectAfter)
+        if (restored && restored.type !== 'science' && restored.type !== 'folder') {
+          await useLibraryStore.getState().openNode(restored.id)
+        }
         setUndo(null)
       },
     })
@@ -81,6 +94,8 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
           onOutlineJump={(blockId) => activeNoteId && requestScrollTo(activeNoteId, blockId)}
           renameRequest={renameRequest}
           onRenameRequestHandled={() => setRenameRequest(null)}
+          writeRequest={writeRequest}
+          onWriteRequestHandled={() => setWriteRequest(null)}
           onContextMenu={(node, event) => setMenu({ node, x: event.clientX, y: event.clientY })}
         />
       </div>
@@ -89,9 +104,14 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
         <ContextMenu
           x={menu.x}
           y={menu.y}
-          label={`Actions for ${menu.node.title || 'item'}`}
+          label={`Actions for ${displayLibraryTitle(menu.node.title, menu.node.arabicTitle)}`}
           onClose={() => setMenu(null)}
           items={[
+            {
+              id: 'add',
+              label: 'Add item',
+              onSelect: () => setWriteRequest({ parentId: menu.node.id }),
+            },
             {
               id: 'rename',
               label: 'Rename',
@@ -131,7 +151,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
       {confirm && (
         <ConfirmDialog
           title="Delete item"
-          body={`${confirm.summary} ${confirm.detail}`}
+          body={[confirm.summary, confirm.detail].filter(Boolean).join(' ')}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             const impact = confirm

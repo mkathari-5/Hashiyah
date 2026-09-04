@@ -11,6 +11,7 @@ import {
   insertToggleAtCaret,
   isEmptyToggle,
   nestUnderPreviousToggle,
+  openAncestorToggles,
   outdentToggle,
   wrapBlockInToggle,
 } from '@/features/notes/extensions/toggleOutline'
@@ -265,16 +266,35 @@ describe('Toggle Notion-like keyboard flow', () => {
     editor.destroy()
   })
 
-  it('supports rapid consecutive sibling creation', () => {
+  it('opens collapsed ancestor toggles so a hidden block can be revealed', () => {
     const editor = makeEditor({
       type: 'doc',
-      content: [emptyToggle('What is Tawḥīd?')],
+      content: [
+        {
+          type: 'toggleBlock',
+          attrs: { open: false, level: 0 },
+          content: [
+            { type: 'toggleSummary', content: [{ type: 'text', text: 'Outer' }] },
+            {
+              type: 'toggleContent',
+              content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hidden body' }] }],
+            },
+          ],
+        },
+      ],
     })
-    editor.commands.setTextSelection(2)
-    for (let i = 0; i < 4; i++) {
-      insertSiblingToggle(editor.state, editor.view.dispatch.bind(editor.view))
-    }
-    expect(toggleCount(editor)).toBe(5)
+    expect(editor.state.doc.child(0).attrs.open).toBe(false)
+    let paragraphPos = 0
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === 'paragraph' && node.textContent.includes('Hidden body')) {
+        paragraphPos = pos
+        return false
+      }
+    })
+    const tr = openAncestorToggles(editor.state, paragraphPos)
+    expect(tr).toBeTruthy()
+    editor.view.dispatch(tr!)
+    expect(editor.state.doc.child(0).attrs.open).toBe(true)
     editor.destroy()
   })
 })

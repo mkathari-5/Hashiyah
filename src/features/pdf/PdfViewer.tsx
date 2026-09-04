@@ -9,6 +9,7 @@ import { PdfPage, type PageContextRegistry } from '@/features/pdf/PdfPage'
 import { SelectionMenu } from '@/features/pdf/SelectionMenu'
 import { SnipOverlay } from '@/features/pdf/SnipOverlay'
 import { usePdfDocument } from '@/features/pdf/usePdfDocument'
+import { isTypingContext } from '@/features/shortcuts/typingContext'
 import { OcrScheduler } from '@/services/ocr/OcrScheduler'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { PageTextContext } from '@/services/annotations/selection'
@@ -54,6 +55,8 @@ export function PdfViewer() {
     status: 'idle',
     error: null as string | null,
   })
+  const [spacePan, setSpacePan] = useState(false)
+  const panActive = pdfTool === 'pan' || spacePan
 
   const book = useLiveQuery(() => (bookId ? booksRepo.get(bookId) : undefined), [bookId])
 
@@ -138,6 +141,29 @@ export function PdfViewer() {
       if (schedulerRef.current === scheduler) schedulerRef.current = null
     }
   }, [handle, documentId])
+
+  useEffect(() => {
+    const onDown = (event: KeyboardEvent) => {
+      if (event.code !== 'Space' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return
+      if (isTypingContext(event.target)) return
+      if (useStudyStore.getState().editingMarkId) return
+      event.preventDefault()
+      setSpacePan(true)
+    }
+    const onUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return
+      setSpacePan(false)
+    }
+    const onBlur = () => setSpacePan(false)
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [])
 
   useEffect(() => {
     schedulerRef.current?.setLanguage(ocrLanguage)
@@ -259,10 +285,10 @@ export function PdfViewer() {
       if (!el) return
       const tag = (event.target as HTMLElement | null)?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (event.key === 'PageDown' || (event.key === ' ' && !event.shiftKey && pdfTool !== 'pan')) {
+      if (event.key === 'PageDown') {
         event.preventDefault()
         el.scrollBy({ top: el.clientHeight * 0.9, behavior: 'smooth' })
-      } else if (event.key === 'PageUp' || (event.key === ' ' && event.shiftKey)) {
+      } else if (event.key === 'PageUp') {
         event.preventDefault()
         el.scrollBy({ top: -el.clientHeight * 0.9, behavior: 'smooth' })
       } else if (event.key === 'Home') {
@@ -273,14 +299,24 @@ export function PdfViewer() {
         el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
       }
     },
-    [pdfTool],
+    [],
   )
 
   const onCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.target === event.currentTarget || pdfTool === 'pan') {
+    const target = event.target as HTMLElement
+    if (!target.closest('.page-mark, .mark-style-bar')) {
+      const study = useStudyStore.getState()
+      if (study.pdfTool === 'select' || study.pdfTool === 'erase') {
+        if (target.closest('.pdf-page-slot') && !target.closest('.pdf-page')) {
+          study.setSelectedMarkId(null)
+          study.setEditingMarkId(null)
+        }
+      }
+    }
+    if (event.target === event.currentTarget || panActive) {
       useStudyStore.getState().setSelection(null)
     }
-    if (pdfTool !== 'pan' || useStudyStore.getState().annotationGesture) return
+    if (!panActive || useStudyStore.getState().annotationGesture) return
     const el = scrollRef.current
     if (!el) return
     panRef.current = { x: event.clientX, y: event.clientY, left: el.scrollLeft, top: el.scrollTop }
@@ -288,7 +324,7 @@ export function PdfViewer() {
   }
 
   const onCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!panRef.current || pdfTool !== 'pan' || useStudyStore.getState().annotationGesture) return
+    if (!panRef.current || !panActive || useStudyStore.getState().annotationGesture) return
     const el = scrollRef.current
     if (!el) return
     el.scrollLeft = panRef.current.left - (event.clientX - panRef.current.x)
@@ -333,7 +369,7 @@ export function PdfViewer() {
         onScroll={onScroll}
         onKeyDown={onKeyDown}
         tabIndex={0}
-        className={`pdf-canvas relative flex-1 overflow-auto outline-none${pdfTool === 'pan' ? ' is-panning' : ''}`}
+        className={`pdf-canvas relative flex-1 overflow-auto outline-none${panActive ? ' is-panning' : ''}`}
         onPointerDown={onCanvasPointerDown}
         onPointerMove={onCanvasPointerMove}
         onPointerUp={onCanvasPointerUp}
@@ -351,17 +387,6 @@ export function PdfViewer() {
                 height: pageHeight,
               }}
             >
-              <PageMarkLayer
-                documentId={documentId!}
-                bookId={bookId}
-                pageNumber={n}
-                pageWidth={pageWidth}
-                pageHeight={pageHeight}
-                pageLeft={pageLeft}
-                rotation={pageRotation as PageRotation}
-                pdfPageWidth={handle.baseWidth}
-                pdfPageHeight={handle.baseHeight}
-              />
               <div
                 className="pdf-page-stage"
                 style={{ position: 'absolute', left: pageLeft, top: 0, width: pageWidth, height: pageHeight }}
@@ -380,6 +405,17 @@ export function PdfViewer() {
                   pdfPageHeight={handle.baseHeight}
                 />
               </div>
+              <PageMarkLayer
+                documentId={documentId!}
+                bookId={bookId}
+                pageNumber={n}
+                pageWidth={pageWidth}
+                pageHeight={pageHeight}
+                pageLeft={pageLeft}
+                rotation={pageRotation as PageRotation}
+                pdfPageWidth={handle.baseWidth}
+                pdfPageHeight={handle.baseHeight}
+              />
             </div>
           ))}
         </div>

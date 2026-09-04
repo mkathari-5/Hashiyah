@@ -33,7 +33,7 @@ export function OutlinePopover({
   }, [onClose])
 
   return (
-    <div ref={ref} className="outline-pop">
+    <div ref={ref} className="outline-pop" role="dialog" aria-label="Outline">
       <div className="block-menu-group">Outline</div>
       {entries.length === 0 ? (
         <p className="outline-pop-empty">

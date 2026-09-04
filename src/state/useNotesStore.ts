@@ -44,6 +44,11 @@ export interface ScrollRequest {
   nonce: number
 }
 
+export interface FindRequest {
+  replace: boolean
+  nonce: number
+}
+
 /**
  * One chapter's revision, in progress.
  *
@@ -66,6 +71,10 @@ interface NotesState {
   pendingScroll: ScrollRequest | null
   requestScrollTo: (noteId: string, blockId: string) => void
   clearScroll: () => void
+
+  pendingFind: FindRequest | null
+  requestFind: (replace?: boolean) => void
+  clearFind: () => void
 
   /**
    * The revision session (§E30, §6).
@@ -105,6 +114,10 @@ export const useNotesStore = create<NotesState>((set) => ({
   pendingScroll: null,
   requestScrollTo: (noteId, blockId) => set({ pendingScroll: { noteId, blockId, nonce: ++nonce } }),
   clearScroll: () => set({ pendingScroll: null }),
+
+  pendingFind: null,
+  requestFind: (replace = false) => set({ pendingFind: { replace, nonce: ++nonce } }),
+  clearFind: () => set({ pendingFind: null }),
 
   revision: null,
 

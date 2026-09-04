@@ -199,9 +199,10 @@ export const useStudyStore = create<StudyState>((set, get) => ({
     set({
       pdfTool,
       snipMode: null,
-      selectedMarkId: pdfTool === 'select' ? get().selectedMarkId : null,
-      // Leaving the text tool must drop the textarea so Select can drag the box.
+      selectedMarkId:
+        pdfTool === 'select' || pdfTool === 'text' || pdfTool === 'erase' ? get().selectedMarkId : null,
       editingMarkId: pdfTool === 'text' ? get().editingMarkId : null,
+      annotationGesture: false,
     }),
   setPageRotation: (pageRotation) => set({ pageRotation }),
   setOcrLanguage: (ocrLanguage) => set({ ocrLanguage }),

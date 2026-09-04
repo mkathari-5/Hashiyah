@@ -89,18 +89,6 @@ export function LibraryBlockRow({
         onFocus(block.id)
       }}
       onContextMenu={(event) => {
-        const target = event.target as HTMLElement
-        const inTitle = target.closest('[data-title-editor], .title-pm, .rich-title')
-        const selection = window.getSelection()
-        if (
-          inTitle &&
-          selection &&
-          !selection.isCollapsed &&
-          selection.anchorNode &&
-          inTitle.contains(selection.anchorNode)
-        ) {
-          return
-        }
         if (!onContextMenu) return
         event.preventDefault()
         event.stopPropagation()

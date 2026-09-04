@@ -56,10 +56,13 @@ export function TitleFormatBar({ editor }: { editor: Editor }) {
   useEffect(() => {
     if (!panel) return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setPanel(null)
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setPanel(null)
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
   }, [panel])
 
   if (!anchor && !panel) return null

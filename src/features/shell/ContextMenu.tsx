@@ -9,6 +9,10 @@ export interface ContextMenuItem {
   onSelect: () => void
 }
 
+function menuButtons(root: HTMLElement | null): HTMLButtonElement[] {
+  return Array.from(root?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [])
+}
+
 export function ContextMenu({
   x,
   y,
@@ -36,10 +40,29 @@ export function ContextMenu({
   }, [x, y, items.length])
 
   useEffect(() => {
+    menuButtons(ref.current)[0]?.focus()
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
+        return
+      }
+      const buttons = menuButtons(ref.current)
+      if (!buttons.length) return
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const index = buttons.findIndex((button) => button === document.activeElement)
+        const delta = event.key === 'ArrowDown' ? 1 : -1
+        const next = (Math.max(index, 0) + delta + buttons.length) % buttons.length
+        buttons[next]?.focus()
+      }
+      if (event.key === 'Home') {
+        event.preventDefault()
+        buttons[0]?.focus()
+      }
+      if (event.key === 'End') {
+        event.preventDefault()
+        buttons[buttons.length - 1]?.focus()
       }
     }
     const onDown = (event: PointerEvent) => {
@@ -51,7 +74,7 @@ export function ContextMenu({
       document.removeEventListener('keydown', onKey)
       document.removeEventListener('pointerdown', onDown)
     }
-  }, [onClose])
+  }, [onClose, items.length])
 
   return createPortal(
     <div
