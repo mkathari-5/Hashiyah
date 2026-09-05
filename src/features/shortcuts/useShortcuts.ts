@@ -80,11 +80,27 @@ export function useShortcuts() {
         if (event.key === 'Escape') {
           if (study.editingMarkId) {
             study.setEditingMarkId(null)
+            return
+          }
+          if (study.selectedMarkId || study.activeAnnotationId) {
+            study.setSelectedMarkId(null)
+            study.setActiveAnnotation(null)
+            study.setAnnotationGesture(false)
+            return
           }
           study.setPdfTool('select')
           study.setSelection(null)
-          study.setSelectedMarkId(null)
           study.setAnnotationGesture(false)
+          return
+        }
+        if (
+          event.key === 'Enter' &&
+          study.selectedMarkId &&
+          !study.editingMarkId &&
+          (study.pdfTool === 'select' || study.pdfTool === 'text')
+        ) {
+          event.preventDefault()
+          study.setEditingMarkId(study.selectedMarkId)
           return
         }
         if ((event.key === 'Delete' || event.key === 'Backspace') && (study.selectedMarkId || study.activeAnnotationId)) {

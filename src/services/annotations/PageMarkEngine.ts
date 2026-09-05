@@ -1,22 +1,29 @@
+import { DEFAULT_TEXT_COLOR } from '@/services/annotations/appearance'
 import { pageMarksRepo } from '@/db/repos/pageMarks'
 import { ids } from '@/lib/id'
 import { isMarginRect } from '@/services/pdf/pageCoords'
 import type { NormalizedRect, PageMark, PageMarkKind, PageMarkStyle } from '@/types'
 
 export const DEFAULT_MARK_STYLE: PageMarkStyle = {
-  fontSize: 15,
-  color: '#6b5344',
+  fontSize: 14,
+  color: DEFAULT_TEXT_COLOR,
   direction: 'auto',
   align: 'start',
-  fillColor: '#d8a13d',
-  fillOpacity: 0.28,
-  strokeColor: '#6b5344',
-  strokeWidth: 1.5,
+  fillColor: '#fffde7',
+  fillOpacity: 0,
+  strokeColor: DEFAULT_TEXT_COLOR,
+  strokeWidth: 0,
 }
 
-export const MARK_COLORS = ['#6b5344', '#8a6a3b', '#3f5d4a', '#3d5a73', '#7a4a48', '#5c4d73', '#1f1b16'] as const
+export const MARK_COLORS = [DEFAULT_TEXT_COLOR, '#6b5344', '#8a6a3b', '#3f5d4a', '#3d5a73', '#7a4a48', '#5c4d73'] as const
 
 export const MARK_SIZES = [12, 14, 15, 18, 22, 28, 36]
+
+export const MARK_FONTS: { id: NonNullable<PageMarkStyle['fontFamily']>; label: string }[] = [
+  { id: 'sans', label: 'Sans' },
+  { id: 'serif', label: 'Serif' },
+  { id: 'arabic', label: 'Arabic' },
+]
 
 export interface CreateMarkInput {
   bookId: string

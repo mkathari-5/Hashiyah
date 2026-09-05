@@ -1,21 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { ContextMenu } from '@/features/shell/ContextMenu'
 import { MarkStyleBar } from '@/features/pdf/MarkStyleBar'
 import { commitNewTextMark, createTrackedMark, deleteMark } from '@/features/pdf/annotationActions'
 import { MARK_DRAG_THRESHOLD, marksReceivePointer, pointerDistance } from '@/features/pdf/pdfToolBehavior'
+import {
+  DEFAULT_HIGHLIGHT_HEX,
+  DEFAULT_HIGHLIGHT_OPACITY,
+  DEFAULT_UNDERLINE_HEX,
+  effectiveLineRect,
+  fontCss,
+  hexToRgba,
+  isLegacyAreaHighlight,
+  isLegacyLineStroke,
+  typewriterSurface,
+  UNDERLINE_WIDTHS,
+} from '@/services/annotations/appearance'
 import { recordMarkUpdated } from '@/services/annotations/history'
 import { MARK_COLORS, PageMarkEngine } from '@/services/annotations/PageMarkEngine'
 import { detectDirection } from '@/lib/dir'
 import {
-  clientToNormalized,
-  defaultTextRect,
   displayPageBox,
   isMarginRect,
   markCssBox,
   movedRect,
-  resizedRect,
+  resizedRectFromHandle,
+  textRectFromDrag,
   type PageBox,
   type PageRotation,
+  type ResizeHandle,
 } from '@/services/pdf/pageCoords'
 import { useStudyStore, type PdfTool } from '@/state/useStudyStore'
 import type { NormalizedRect, PageMark, PageMarkStyle } from '@/types'
@@ -31,7 +44,10 @@ type Gesture = {
   pageBox: PageBox
   rotation: PageRotation
   moved: boolean
+  handle?: ResizeHandle
 }
+
+const RESIZE_HANDLES: ResizeHandle[] = ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']
 
 export function PageMarkLayer({
   documentId,
@@ -66,6 +82,12 @@ export function PageMarkLayer({
   const setEditing = useStudyStore((s) => s.setEditingMarkId)
   const layerRef = useRef<HTMLDivElement>(null)
   const interactive = marksReceivePointer(tool)
+  const [draftRect, setDraftRect] = useState<NormalizedRect | null>(null)
+  const createGesture = useRef<{
+    pointerId: number
+    start: { x: number; y: number }
+  } | null>(null)
+  const [markMenu, setMarkMenu] = useState<{ x: number; y: number; id: string } | null>(null)
 
   const pageMetrics = () => {
     const layer = layerRef.current?.getBoundingClientRect()
@@ -79,22 +101,28 @@ export function PageMarkLayer({
     }
   }
 
-  const onBackgroundPointerDown = (event: React.PointerEvent) => {
-    if (event.button !== 0) return
-    const target = event.target as HTMLElement
-    if (target.closest('.page-mark')) return
-    if (tool !== 'text') {
-      if (tool === 'select' || tool === 'erase') {
-        setSelected(null)
-        setEditing(null)
-      }
-      return
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      if (!createGesture.current && !draftRect) return
+      event.preventDefault()
+      event.stopPropagation()
+      createGesture.current = null
+      setDraftRect(null)
+      useStudyStore.getState().setAnnotationGesture(false)
     }
-    event.preventDefault()
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [draftRect])
+
+  const finishCreate = (client: { x: number; y: number }) => {
+    const active = createGesture.current
+    createGesture.current = null
+    setDraftRect(null)
+    useStudyStore.getState().setAnnotationGesture(false)
     const metrics = pageMetrics()
-    if (!metrics) return
-    const origin = clientToNormalized({ x: event.clientX, y: event.clientY }, metrics.box, rotation)
-    const rect = defaultTextRect(origin, pageWidth, pageHeight)
+    if (!active || !metrics) return
+    const rect = textRectFromDrag(active.start, client, metrics.box, rotation, pageWidth, pageHeight)
     void createTrackedMark({
       bookId,
       documentId,
@@ -109,6 +137,25 @@ export function PageMarkLayer({
     })
   }
 
+  const onBackgroundPointerDown = (event: React.PointerEvent) => {
+    if (event.button !== 0) return
+    const target = event.target as HTMLElement
+    if (target.closest('.page-mark, .mark-style-bar, .node-menu')) return
+    if (tool !== 'text') {
+      if (tool === 'select' || tool === 'erase') {
+        setSelected(null)
+        setEditing(null)
+      }
+      return
+    }
+    event.preventDefault()
+    const metrics = pageMetrics()
+    if (!metrics) return
+    createGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY } }
+    useStudyStore.getState().setAnnotationGesture(true)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
   return (
     <div
       ref={layerRef}
@@ -121,7 +168,31 @@ export function PageMarkLayer({
         .filter(Boolean)
         .join(' ')}
       onPointerDown={onBackgroundPointerDown}
+      onPointerMove={(event) => {
+        const active = createGesture.current
+        if (!active || active.pointerId !== event.pointerId) return
+        const metrics = pageMetrics()
+        if (!metrics) return
+        if (pointerDistance(active.start, { x: event.clientX, y: event.clientY }) < MARK_DRAG_THRESHOLD) return
+        setDraftRect(textRectFromDrag(active.start, { x: event.clientX, y: event.clientY }, metrics.box, rotation, pageWidth, pageHeight))
+      }}
+      onPointerUp={(event) => {
+        if (createGesture.current?.pointerId === event.pointerId) {
+          finishCreate({ x: event.clientX, y: event.clientY })
+        }
+      }}
+      onPointerCancel={() => {
+        createGesture.current = null
+        setDraftRect(null)
+        useStudyStore.getState().setAnnotationGesture(false)
+      }}
     >
+      {draftRect && (
+        <div
+          className="page-mark-draft"
+          style={markCssBox(draftRect, pageWidth, pageHeight, pageLeft, rotation)}
+        />
+      )}
       {marks.map((mark) => (
         <MarkItem
           key={mark.id}
@@ -137,8 +208,46 @@ export function PageMarkLayer({
             setSelected(mark.id)
             useStudyStore.getState().setActiveAnnotation(null)
           }}
+          onContextMenu={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            setSelected(mark.id)
+            setMarkMenu({ x: event.clientX, y: event.clientY, id: mark.id })
+          }}
         />
       ))}
+      {markMenu && (
+        <ContextMenu
+          x={markMenu.x}
+          y={markMenu.y}
+          label="Annotation"
+          onClose={() => setMarkMenu(null)}
+          items={[
+            {
+              id: 'props',
+              label: 'Properties',
+              onSelect: () => {
+                setSelected(markMenu.id)
+                setEditing(null)
+              },
+            },
+            {
+              id: 'colour',
+              label: 'Change colour',
+              onSelect: () => {
+                setSelected(markMenu.id)
+                setEditing(null)
+              },
+            },
+            {
+              id: 'delete',
+              label: 'Delete',
+              danger: true,
+              onSelect: () => void deleteMark(markMenu.id),
+            },
+          ]}
+        />
+      )}
     </div>
   )
 }
@@ -153,6 +262,7 @@ function MarkItem({
   editing,
   pageBoxOf,
   onSelect,
+  onContextMenu,
 }: {
   mark: PageMark
   pageWidth: number
@@ -163,6 +273,7 @@ function MarkItem({
   editing: boolean
   pageBoxOf: () => { box: PageBox; pageWidth: number; pageHeight: number; pageLeft: number; rotation: PageRotation } | null
   onSelect: () => void
+  onContextMenu: (event: React.MouseEvent) => void
 }) {
   const tool = useStudyStore((s) => s.pdfTool)
   const setEditing = useStudyStore((s) => s.setEditingMarkId)
@@ -178,6 +289,7 @@ function MarkItem({
         selected={selected}
         pageBoxOf={pageBoxOf}
         onSelect={onSelect}
+        onContextMenu={onContextMenu}
       />
     )
   }
@@ -194,6 +306,7 @@ function MarkItem({
       pageBoxOf={pageBoxOf}
       onSelect={onSelect}
       onEdit={() => setEditing(mark.id)}
+      onContextMenu={onContextMenu}
       tool={tool}
     />
   )
@@ -208,6 +321,7 @@ function ShapeMark({
   selected,
   pageBoxOf,
   onSelect,
+  onContextMenu,
 }: {
   mark: PageMark
   pageWidth: number
@@ -217,6 +331,7 @@ function ShapeMark({
   selected: boolean
   pageBoxOf: () => { box: PageBox; rotation: PageRotation } | null
   onSelect: () => void
+  onContextMenu: (event: React.MouseEvent) => void
 }) {
   const tool = useStudyStore((s) => s.pdfTool)
   const [liveRect, setLiveRect] = useState<NormalizedRect | null>(null)
@@ -232,9 +347,17 @@ function ShapeMark({
     }
   }, [mark.rect])
 
-  const rect = liveRect ?? mark.rect
+  const stored = liveRect ?? mark.rect
+  const rect = mark.kind === 'line' ? effectiveLineRect(stored, mark.style) : stored
   const box = markCssBox(rect, pageWidth, pageHeight, pageLeft, rotation)
   const isLine = mark.kind === 'line'
+  const legacyLine = isLine && isLegacyLineStroke(mark.style, stored)
+  const lineColor = legacyLine
+    ? DEFAULT_UNDERLINE_HEX
+    : (mark.style.strokeColor ?? mark.style.color ?? DEFAULT_UNDERLINE_HEX)
+  const areaFill = isLegacyAreaHighlight(mark.style)
+    ? hexToRgba(DEFAULT_HIGHLIGHT_HEX, DEFAULT_HIGHLIGHT_OPACITY)
+    : hexToRgba(mark.style.fillColor ?? DEFAULT_HIGHLIGHT_HEX, mark.style.fillOpacity ?? DEFAULT_HIGHLIGHT_OPACITY)
 
   const previewRect = (next: NormalizedRect) => {
     liveRectRef.current = next
@@ -282,19 +405,21 @@ function ShapeMark({
               left: box.left,
               top: box.top,
               width: Math.max(box.width, 2),
-              height: Math.max(box.height, mark.style.strokeWidth ?? 2),
-              background: mark.style.strokeColor ?? mark.style.color,
+              height: Math.max(box.height, 0.75),
+              background: lineColor,
             }
           : {
               left: box.left,
               top: box.top,
               width: box.width,
               height: box.height,
-              background: colorWithOpacity(mark.style.fillColor ?? '#d8a13d', mark.style.fillOpacity ?? 0.28),
+              background: areaFill,
             }
       }
+      onContextMenu={onContextMenu}
       onPointerDown={(event) => {
         event.stopPropagation()
+        if (event.button !== 0) return
         if (tool === 'erase') {
           void deleteMark(mark.id)
           return
@@ -309,7 +434,7 @@ function ShapeMark({
           mode: 'drag',
           pointerId: event.pointerId,
           startClient: { x: event.clientX, y: event.clientY },
-          origin: rect,
+          origin: stored,
           pageBox: metrics.box,
           rotation: metrics.rotation,
           moved: false,
@@ -342,6 +467,17 @@ function ShapeMark({
         <StrokeColorBar
           color={isLine ? (mark.style.strokeColor ?? mark.style.color) : (mark.style.fillColor ?? mark.style.color)}
           onChange={patchColor}
+          line={isLine}
+          thickness={rect.h}
+          onThickness={(h) => {
+            void (async () => {
+              const before = await PageMarkEngine.get(mark.id)
+              const next = { ...mark.rect, h, y: mark.rect.y + (mark.rect.h - h) / 2 }
+              await PageMarkEngine.update(mark.id, { rect: next, style: { ...mark.style, strokeWidth: 1 } })
+              const after = await PageMarkEngine.get(mark.id)
+              if (before && after) recordMarkUpdated(before, after)
+            })()
+          }}
         />
       )}
     </div>
@@ -359,6 +495,7 @@ function TextMark({
   pageBoxOf,
   onSelect,
   onEdit,
+  onContextMenu,
   tool,
 }: {
   mark: PageMark
@@ -371,6 +508,7 @@ function TextMark({
   pageBoxOf: () => { box: PageBox; rotation: PageRotation } | null
   onSelect: () => void
   onEdit: () => void
+  onContextMenu: (event: React.MouseEvent) => void
   tool: PdfTool
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -407,6 +545,7 @@ function TextMark({
   const dir = mark.style.direction === 'auto' ? detectDirection(draft, 'rtl') : mark.style.direction
   const align =
     mark.style.align === 'center' ? 'center' : mark.style.align === 'end' ? 'end' : dir === 'rtl' ? 'right' : 'left'
+  const chrome = typewriterSurface(mark.style)
 
   const previewRect = (next: NormalizedRect) => {
     liveRectRef.current = next
@@ -489,9 +628,10 @@ function TextMark({
     })()
   }
 
-  const beginDrag = (event: React.PointerEvent, mode: 'drag' | 'resize') => {
+  const beginDrag = (event: React.PointerEvent, mode: 'drag' | 'resize', handle: ResizeHandle = 'se') => {
     const metrics = pageBoxOf()
     if (!metrics) return
+    event.preventDefault()
     beforeMove.current = mark
     gesture.current = {
       mode,
@@ -501,8 +641,10 @@ function TextMark({
       pageBox: metrics.box,
       rotation: metrics.rotation,
       moved: false,
+      handle,
     }
-    ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+    const root = (event.currentTarget as HTMLElement).closest('.page-mark') as HTMLElement | null
+    root?.setPointerCapture(event.pointerId)
   }
 
   return (
@@ -513,13 +655,25 @@ function TextMark({
         top: box.top,
         width: box.width,
         height: box.height,
-        color: mark.style.color,
+        color: chrome.color,
+        background: chrome.background,
+        border: chrome.border,
+        boxShadow: chrome.boxShadow,
         fontSize: mark.style.fontSize,
         textAlign: align,
-        fontFamily: dir === 'rtl' ? 'var(--font-arabic), serif' : 'var(--font-sans), sans-serif',
+        fontFamily: fontCss(mark.style, dir),
+      }}
+      tabIndex={selected ? 0 : -1}
+      onContextMenu={onContextMenu}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && selected && !editing) {
+          event.preventDefault()
+          onEdit()
+        }
       }}
       onPointerDown={(event) => {
         event.stopPropagation()
+        if (event.button !== 0) return
         if (tool === 'erase') {
           void deleteMark(mark.id)
           return
@@ -547,7 +701,18 @@ function TextMark({
           setGestureFlag(true)
         }
         if (active.mode === 'resize') {
-          previewRect(resizedRect(active.origin, active.startClient, now, active.pageBox, active.rotation, MIN_W, MIN_H))
+          previewRect(
+            resizedRectFromHandle(
+              active.origin,
+              active.startClient,
+              now,
+              active.pageBox,
+              active.rotation,
+              active.handle ?? 'se',
+              MIN_W,
+              MIN_H,
+            ),
+          )
           return
         }
         previewRect(movedRect(active.origin, active.startClient, now, active.pageBox, active.rotation))
@@ -576,7 +741,7 @@ function TextMark({
         dir={mark.style.direction === 'auto' ? 'auto' : mark.style.direction}
         value={draft}
         readOnly={!editing}
-        placeholder="Note"
+        placeholder=""
         rows={2}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={(event) => {
@@ -605,35 +770,37 @@ function TextMark({
           }
         }}
       />
-      {selected && !editing && (
-        <span
-          className="page-mark-resize"
-          onPointerDown={(event) => {
-            event.stopPropagation()
-            selectedOnDown.current = selected
-            onSelect()
-            const metrics = pageBoxOf()
-            if (!metrics) return
-            beforeMove.current = mark
-            gesture.current = {
-              mode: 'resize',
-              pointerId: event.pointerId,
-              startClient: { x: event.clientX, y: event.clientY },
-              origin: rect,
-              pageBox: metrics.box,
-              rotation: metrics.rotation,
-              moved: false,
-            }
-            setGestureFlag(true)
-            ;(event.currentTarget.parentElement as HTMLElement)?.setPointerCapture(event.pointerId)
-          }}
-        />
-      )}
+      {selected && !editing &&
+        RESIZE_HANDLES.map((handle) => (
+          <span
+            key={handle}
+            className={`page-mark-resize is-${handle}`}
+            onPointerDown={(event) => {
+              event.stopPropagation()
+              selectedOnDown.current = selected
+              onSelect()
+              beginDrag(event, 'resize', handle)
+              setGestureFlag(true)
+            }}
+          />
+        ))}
     </div>
   )
 }
 
-function StrokeColorBar({ color, onChange }: { color: string; onChange: (color: string) => void }) {
+function StrokeColorBar({
+  color,
+  onChange,
+  line,
+  thickness,
+  onThickness,
+}: {
+  color: string
+  onChange: (color: string) => void
+  line?: boolean
+  thickness?: number
+  onThickness?: (h: number) => void
+}) {
   return (
     <div
       className="mark-style-bar"
@@ -656,20 +823,26 @@ function StrokeColorBar({ color, onChange }: { color: string; onChange: (color: 
           onClick={() => onChange(value)}
         />
       ))}
+      {line && onThickness && (
+        <>
+          <span className="pdf-annot-sep" />
+          {UNDERLINE_WIDTHS.map((width) => (
+            <button
+              key={width.id}
+              type="button"
+              className={`mark-style-chip${Math.abs((thickness ?? 0) - width.thickness) < 0.0004 ? ' is-active' : ''}`}
+              aria-pressed={Math.abs((thickness ?? 0) - width.thickness) < 0.0004}
+              onClick={() => onThickness(width.thickness)}
+            >
+              {width.label}
+            </button>
+          ))}
+        </>
+      )}
     </div>
   )
 }
 
 function rectChanged(a: NormalizedRect, b: NormalizedRect): boolean {
   return a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h
-}
-
-function colorWithOpacity(hex: string, opacity: number): string {
-  const raw = hex.replace('#', '')
-  if (raw.length !== 6) return hex
-  const n = Number.parseInt(raw, 16)
-  const r = (n >> 16) & 255
-  const g = (n >> 8) & 255
-  const b = n & 255
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`
 }

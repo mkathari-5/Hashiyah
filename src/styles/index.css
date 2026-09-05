@@ -186,41 +186,40 @@
   height: 100%;
   min-height: 0;
   border: none;
-  background: color-mix(in srgb, var(--color-elevated) 88%, transparent);
+  background: transparent;
   color: inherit;
   font: inherit;
   text-align: inherit;
   line-height: 1.35;
-  padding: 0.2rem 0.35rem;
+  padding: 0;
   outline: none;
   overflow: hidden;
   unicode-bidi: plaintext;
 }
 .page-mark-note {
-  background: color-mix(in srgb, var(--color-elevated) 92%, var(--color-accent-soft));
-  border: 1px solid color-mix(in srgb, var(--color-line-strong) 70%, transparent);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.06);
-  border-radius: 3px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
   overflow: visible;
-  min-width: 4.5rem;
-  min-height: 1.75rem;
+  min-width: 2rem;
+  min-height: 1.1rem;
 }
 .page-mark.is-margin {
-  background: var(--color-elevated);
+  background: transparent;
 }
 .page-mark.is-selected {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: none;
 }
 .page-mark-area {
   mix-blend-mode: multiply;
   cursor: grab;
 }
 :root.dark .page-mark-area {
-  mix-blend-mode: screen;
+  mix-blend-mode: multiply;
 }
 .page-mark-line {
-  border-radius: 1px;
+  border-radius: 0;
   cursor: grab;
 }
 .page-mark-line::after {
@@ -229,19 +228,31 @@
   left: 0;
   right: 0;
   top: 50%;
-  height: 14px;
+  height: 10px;
   transform: translateY(-50%);
 }
 .page-mark-resize {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
   z-index: 5;
-  width: 10px;
-  height: 10px;
-  border-radius: 1px;
-  background: var(--color-accent);
-  cursor: nwse-resize;
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--color-accent);
+  background: var(--color-elevated);
+  box-sizing: border-box;
+}
+.page-mark-resize.is-n { top: -4px; left: 50%; margin-left: -3px; cursor: ns-resize; }
+.page-mark-resize.is-s { bottom: -4px; left: 50%; margin-left: -3px; cursor: ns-resize; }
+.page-mark-resize.is-e { right: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+.page-mark-resize.is-w { left: -4px; top: 50%; margin-top: -3px; cursor: ew-resize; }
+.page-mark-resize.is-ne { top: -4px; right: -4px; cursor: nesw-resize; }
+.page-mark-resize.is-nw { top: -4px; left: -4px; cursor: nwse-resize; }
+.page-mark-resize.is-se { bottom: -4px; right: -4px; cursor: nwse-resize; }
+.page-mark-resize.is-sw { bottom: -4px; left: -4px; cursor: nesw-resize; }
+.page-mark-draft {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed color-mix(in srgb, var(--color-accent) 70%, transparent);
+  background: transparent;
 }
 
 .mark-style-bar {
@@ -395,18 +406,21 @@
 .hl-underline {
   position: absolute;
   pointer-events: none;
-  border-radius: 1px;
-  background: color-mix(in srgb, var(--color-hl-amber) 85%, transparent);
+  border-radius: 0;
+  background: var(--color-hl-ink);
+  min-height: 0.75px;
   mix-blend-mode: multiply;
 }
-.hl-underline-green { background: color-mix(in srgb, var(--color-hl-green) 85%, transparent); }
-.hl-underline-blue { background: color-mix(in srgb, var(--color-hl-blue) 85%, transparent); }
-.hl-underline-rose { background: color-mix(in srgb, var(--color-hl-rose) 85%, transparent); }
-.hl-underline-violet { background: color-mix(in srgb, var(--color-hl-violet) 85%, transparent); }
-.hl-underline-neutral { background: color-mix(in srgb, var(--color-hl-neutral) 85%, transparent); }
-.hl-underline-amber { background: color-mix(in srgb, var(--color-hl-amber) 85%, transparent); }
+.hl-underline-ink { background: var(--color-hl-ink); }
+.hl-underline-green { background: var(--color-hl-green); }
+.hl-underline-blue { background: var(--color-hl-blue); }
+.hl-underline-rose { background: var(--color-hl-rose); }
+.hl-underline-violet { background: var(--color-hl-violet); }
+.hl-underline-neutral { background: var(--color-hl-neutral); }
+.hl-underline-amber { background: var(--color-hl-amber); }
+.hl-underline-yellow { background: var(--color-hl-ink); }
 :root.dark .hl-underline {
-  mix-blend-mode: screen;
+  mix-blend-mode: multiply;
 }
 
 .ocr-source-label {
@@ -502,11 +516,13 @@
 }
 
 .hl-amber { background: color-mix(in srgb, var(--color-hl-amber) 34%, transparent); }
+.hl-yellow { background: rgb(255 235 59 / 0.35); }
 .hl-green { background: color-mix(in srgb, var(--color-hl-green) 32%, transparent); }
 .hl-blue { background: color-mix(in srgb, var(--color-hl-blue) 32%, transparent); }
 .hl-rose { background: color-mix(in srgb, var(--color-hl-rose) 30%, transparent); }
 .hl-violet { background: color-mix(in srgb, var(--color-hl-violet) 30%, transparent); }
 .hl-neutral { background: color-mix(in srgb, var(--color-hl-neutral) 26%, transparent); }
+.hl-ink { background: color-mix(in srgb, var(--color-hl-ink) 22%, transparent); }
 
 .hl:hover {
   filter: brightness(1.12) saturate(1.2);
@@ -3641,7 +3657,7 @@ svg.block-menu-icon {
 }
 .page-mark-frame {
   position: absolute;
-  inset: 0;
+  inset: -1px;
   z-index: 2;
   pointer-events: none;
   border: 1px solid transparent;
@@ -3649,7 +3665,10 @@ svg.block-menu-icon {
 .page-mark-note.is-selected:not(.is-editing) .page-mark-frame {
   pointer-events: auto;
   cursor: grab;
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 65%, transparent);
+}
+.page-mark-note.is-editing .page-mark-frame {
+  border-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
 }
 .page-mark-note.is-selected:not(.is-editing) .page-mark-frame:active {
   cursor: grabbing;
@@ -3660,6 +3679,38 @@ svg.block-menu-icon {
 }
 .page-mark-note.is-selected:not(.is-editing) {
   touch-action: none;
+}
+
+.annot-props-panel {
+  position: fixed;
+  z-index: 90;
+  min-width: 11.5rem;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-popover);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.annot-props-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.annot-props-reset,
+.annot-props-done {
+  font-size: 11.5px;
+  color: var(--color-accent);
+  text-align: start;
+}
+.annot-props-opacity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 11px;
+  color: var(--color-ink-muted);
 }
 
 .ProseMirror [data-line-height='1'] { line-height: 1; }
@@ -3688,9 +3739,17 @@ svg.block-menu-icon {
   .revision-bar,
   .pdf-annot-bar,
   .page-block-gutter,
-  .block-handle {
+  .block-handle,
+  .mark-style-bar,
+  .page-mark-resize,
+  .page-mark-frame,
+  .annot-props-panel,
+  .node-menu {
     display: none !important;
     visibility: hidden !important;
+  }
+  .page-mark.is-selected {
+    outline: none !important;
   }
   .note-surface {
     position: absolute !important;

@@ -276,7 +276,15 @@ export const ANNOTATION_KINDS = [
 
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
 
-export type HighlightColor = 'amber' | 'green' | 'blue' | 'rose' | 'violet' | 'neutral'
+export type HighlightColor =
+  | 'yellow'
+  | 'amber'
+  | 'green'
+  | 'blue'
+  | 'rose'
+  | 'violet'
+  | 'neutral'
+  | 'ink'
 
 export interface Annotation {
   id: string
@@ -285,6 +293,8 @@ export interface Annotation {
   pageNumber: number
   kind: AnnotationKind
   color: HighlightColor
+  /** Optional overlay opacity for highlights. Absent means the kind default. */
+  opacity?: number
   /** Raw selected text, byte-for-byte as it appeared. Sacred. */
   selectedText: string
   normalizedText: string
@@ -337,12 +347,14 @@ export type PageMarkKind = 'text' | 'margin' | 'area' | 'line'
 
 export type TextDirectionMode = 'auto' | 'rtl' | 'ltr'
 export type TextAlign = 'start' | 'center' | 'end'
+export type MarkFontFamily = 'sans' | 'serif' | 'arabic'
 
 export interface PageMarkStyle {
   fontSize: number
   color: string
   direction: TextDirectionMode
   align: TextAlign
+  fontFamily?: MarkFontFamily
   fillColor?: string
   fillOpacity?: number
   strokeColor?: string

@@ -4,7 +4,7 @@ import { documentsRepo } from '@/db/repos/documents'
 import { notesRepo } from '@/db/repos/notes'
 import { readingStateRepo } from '@/db/repos/session'
 import type { CapturedSelection } from '@/services/annotations/selection'
-import type { OcrLanguage } from '@/types'
+import type { HighlightColor, OcrLanguage } from '@/types'
 
 /** 'capture' inserts the region; 'explain' also drops a paragraph beneath (§D10). */
 export type SnipMode = null | 'capture' | 'explain'
@@ -55,6 +55,8 @@ interface StudyState {
   editingMarkId: string | null
   /** True while a mark is being dragged or resized — viewer pan must not run. */
   annotationGesture: boolean
+  lastHighlightColor: HighlightColor
+  lastUnderlineColor: HighlightColor
 
   openBook: (bookId: string) => Promise<void>
   closeBook: () => void
@@ -78,6 +80,8 @@ interface StudyState {
   setSelectedMarkId: (id: string | null) => void
   setEditingMarkId: (id: string | null) => void
   setAnnotationGesture: (active: boolean) => void
+  setLastHighlightColor: (color: HighlightColor) => void
+  setLastUnderlineColor: (color: HighlightColor) => void
 }
 
 let nonce = 0
@@ -103,6 +107,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   selectedMarkId: null,
   editingMarkId: null,
   annotationGesture: false,
+  lastHighlightColor: 'yellow',
+  lastUnderlineColor: 'ink',
 
   async openBook(bookId) {
     if (get().bookId === bookId) return
@@ -209,4 +215,6 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setSelectedMarkId: (selectedMarkId) => set({ selectedMarkId, activeAnnotationId: selectedMarkId ? null : get().activeAnnotationId }),
   setEditingMarkId: (editingMarkId) => set({ editingMarkId }),
   setAnnotationGesture: (annotationGesture) => set({ annotationGesture }),
+  setLastHighlightColor: (lastHighlightColor) => set({ lastHighlightColor }),
+  setLastUnderlineColor: (lastUnderlineColor) => set({ lastUnderlineColor }),
 }))

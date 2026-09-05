@@ -146,6 +146,26 @@ export function defaultTextRect(origin: PagePoint, pageCssWidth: number, pageCss
   }
 }
 
+export function textRectFromDrag(
+  start: PagePoint,
+  end: PagePoint,
+  page: PageBox,
+  rotation: PageRotation,
+  pageCssWidth: number,
+  pageCssHeight: number,
+): NormalizedRect {
+  const drawn = clientRectToNormalized(start, end, page, rotation, { minSize: 0.002 })
+  if (!drawn || (drawn.w < 0.04 && drawn.h < 0.02)) {
+    return defaultTextRect(clientToNormalized(start, page, rotation), pageCssWidth, pageCssHeight)
+  }
+  return {
+    x: drawn.x,
+    y: drawn.y,
+    w: Math.max(drawn.w, 0.08),
+    h: Math.max(drawn.h, 0.03),
+  }
+}
+
 export function translateRect(rect: NormalizedRect, dx: number, dy: number): NormalizedRect {
   return { ...rect, x: rect.x + dx, y: rect.y + dy }
 }
@@ -184,22 +204,33 @@ export function resizedRect(
   }
 }
 
-export function underlineRectForLine(line: NormalizedRect, thickness = 0.007): NormalizedRect {
-  const h = Math.max(thickness, Math.min(0.012, line.h * 0.12 || thickness))
+export type ResizeHandle = 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w' | 'nw'
+
+/**
+ * Hairline underline in unrotated page space. Full glyph boxes become a line at
+ * the bottom of the em-box. Previous oversized defaults (~0.007–0.012) are
+ * re-thinned at render time without rewriting stored anchors.
+ */
+export function underlineRectForLine(line: NormalizedRect, thickness = 0.0012): NormalizedRect {
+  const fatDefault = line.h >= 0.004 && line.h <= 0.016
+  const glyphBox = line.h > 0.016
+  if (!fatDefault && !glyphBox) {
+    return { ...line, h: Math.max(line.h, thickness * 0.75) }
+  }
   return {
     x: line.x,
-    y: line.y + Math.max(0, line.h - h * 1.15),
+    y: line.y + Math.max(0, line.h - thickness),
     w: line.w,
-    h,
+    h: thickness,
   }
 }
 
 export function underlineRectsForSelection(rects: NormalizedRect[]): NormalizedRect[] {
-  return rects.map((rect) => (rect.h <= 0.014 ? { ...rect } : underlineRectForLine(rect)))
+  return rects.map((rect) => underlineRectForLine(rect))
 }
 
 /** Horizontal line locked to the start y so a drag stays straight. */
-export function horizontalLineFromDrag(start: PagePoint, end: PagePoint, thickness = 0.008): NormalizedRect {
+export function horizontalLineFromDrag(start: PagePoint, end: PagePoint, thickness = 0.0012): NormalizedRect {
   const x = Math.min(start.x, end.x)
   const w = Math.max(Math.abs(end.x - start.x), 0.012)
   return {
@@ -208,6 +239,42 @@ export function horizontalLineFromDrag(start: PagePoint, end: PagePoint, thickne
     w,
     h: thickness,
   }
+}
+
+export function resizedRectFromHandle(
+  origin: NormalizedRect,
+  startClient: PagePoint,
+  nowClient: PagePoint,
+  page: PageBox,
+  rotation: PageRotation = 0,
+  handle: ResizeHandle = 'se',
+  minW = 0.08,
+  minH = 0.03,
+): NormalizedRect {
+  const start = clientToNormalized(startClient, page, rotation)
+  const now = clientToNormalized(nowClient, page, rotation)
+  const dx = now.x - start.x
+  const dy = now.y - start.y
+  let { x, y, w, h } = origin
+  if (handle.includes('e')) w = origin.w + dx
+  if (handle.includes('s')) h = origin.h + dy
+  if (handle.includes('w')) {
+    x = origin.x + dx
+    w = origin.w - dx
+  }
+  if (handle.includes('n')) {
+    y = origin.y + dy
+    h = origin.h - dy
+  }
+  if (w < minW) {
+    if (handle.includes('w')) x = origin.x + origin.w - minW
+    w = minW
+  }
+  if (h < minH) {
+    if (handle.includes('n')) y = origin.y + origin.h - minH
+    h = minH
+  }
+  return { x, y, w, h }
 }
 
 export function displayPageBox(layer: DOMRect, pageLeft: number, pageWidth: number, pageHeight: number): PageBox {

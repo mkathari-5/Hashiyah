@@ -66,11 +66,13 @@
   --color-accent-soft: var(--accent-soft);
 
   --color-hl-amber: #c4923a;
+  --color-hl-yellow: #ffeb3b;
   --color-hl-green: #56916a;
   --color-hl-blue: #4a7fa8;
   --color-hl-rose: #b8615f;
   --color-hl-violet: #7f6aa8;
   --color-hl-neutral: #8d867b;
+  --color-hl-ink: #1a1a1a;
 
   --color-quran: #8f3a34;
   --color-hadith: #1f6544;
@@ -91,11 +93,13 @@
   --color-accent-soft: var(--accent-soft);
 
   --color-hl-amber: #c4923a;
+  --color-hl-yellow: #ffeb3b;
   --color-hl-green: #56916a;
   --color-hl-blue: #4a7fa8;
   --color-hl-rose: #b8615f;
   --color-hl-violet: #7f6aa8;
   --color-hl-neutral: #8d867b;
+  --color-hl-ink: #1a1a1a;
 
   --color-quran: #8f3a34;
   --color-hadith: #1f6544;
@@ -134,11 +138,13 @@
     0 14px 38px rgb(0 0 0 / 0.5);
 
   --color-hl-amber: #c99a4d;
+  --color-hl-yellow: #ffeb3b;
   --color-hl-green: #6ba580;
   --color-hl-blue: #5f9ac4;
   --color-hl-rose: #cc7674;
   --color-hl-violet: #9a83c4;
   --color-hl-neutral: #8d867b;
+  --color-hl-ink: #1a1a1a;
 
   --color-quran: #e0918a;
   --color-hadith: #7cc5a0;

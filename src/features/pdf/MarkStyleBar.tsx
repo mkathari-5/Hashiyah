@@ -1,4 +1,5 @@
-import { MARK_COLORS, MARK_SIZES } from '@/services/annotations/PageMarkEngine'
+import { isLegacyTextCard } from '@/services/annotations/appearance'
+import { MARK_COLORS, MARK_FONTS, MARK_SIZES } from '@/services/annotations/PageMarkEngine'
 import type { PageMarkStyle, TextAlign, TextDirectionMode } from '@/types'
 
 export function MarkStyleBar({
@@ -8,12 +9,33 @@ export function MarkStyleBar({
   style: PageMarkStyle
   onChange: (patch: Partial<PageMarkStyle>) => void
 }) {
+  const legacy = isLegacyTextCard(style)
+  const filled = !legacy && (style.fillOpacity ?? 0) > 0.01
+  const bordered = !legacy && (style.strokeWidth ?? 0) > 0
+
   return (
     <div className="mark-style-bar" role="toolbar" aria-label="Text annotation style" onPointerDown={(e) => {
       e.stopPropagation()
       const tag = (e.target as HTMLElement).tagName
       if (tag !== 'SELECT' && tag !== 'INPUT') e.preventDefault()
     }}>
+      <label className="mark-style-field">
+        <span className="sr-only">Font</span>
+        <select
+          value={style.fontFamily ?? 'auto'}
+          onChange={(event) => {
+            const value = event.target.value
+            onChange({ fontFamily: value === 'auto' ? undefined : (value as PageMarkStyle['fontFamily']) })
+          }}
+        >
+          <option value="auto">Auto</option>
+          {MARK_FONTS.map((font) => (
+            <option key={font.id} value={font.id}>
+              {font.label}
+            </option>
+          ))}
+        </select>
+      </label>
       <label className="mark-style-field">
         <span className="sr-only">Font size</span>
         <select
@@ -92,6 +114,27 @@ export function MarkStyleBar({
           {align === 'start' ? '⇤' : align === 'center' ? '↔' : '⇥'}
         </button>
       ))}
+
+      <span className="pdf-annot-sep" />
+
+      <button
+        type="button"
+        className={`mark-style-chip${filled ? ' is-active' : ''}`}
+        aria-pressed={filled}
+        title="Background"
+        onClick={() => onChange(filled ? { fillOpacity: 0 } : { fillColor: '#fffde7', fillOpacity: 0.92 })}
+      >
+        Fill
+      </button>
+      <button
+        type="button"
+        className={`mark-style-chip${bordered ? ' is-active' : ''}`}
+        aria-pressed={bordered}
+        title="Border"
+        onClick={() => onChange(bordered ? { strokeWidth: 0 } : { strokeWidth: 1, strokeColor: style.color })}
+      >
+        Border
+      </button>
     </div>
   )
 }

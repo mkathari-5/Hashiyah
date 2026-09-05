@@ -145,6 +145,16 @@ export async function snapshotAnnotation(id: string): Promise<{ annotation: Anno
   return { annotation, anchor }
 }
 
+export function recordAnnotationUpdated(
+  before: { annotation: Annotation; anchor: AnnotationAnchor },
+  after: { annotation: Annotation; anchor: AnnotationAnchor },
+) {
+  markHistory.push({
+    undo: { type: 'restore-annotation', annotation: before.annotation, anchor: before.anchor },
+    redo: { type: 'restore-annotation', annotation: after.annotation, anchor: after.anchor },
+  })
+}
+
 export function recordAnnotationRemoved(annotation: Annotation, anchor: AnnotationAnchor) {
   markHistory.push({
     undo: { type: 'restore-annotation', annotation, anchor },

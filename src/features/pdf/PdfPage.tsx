@@ -2,7 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { recordMarkCreated } from '@/services/annotations/history'
 import { pagesRepo } from '@/db/repos/documents'
+import { AnnotationMarkupMenu, type AnnotationMenuState } from '@/features/pdf/AnnotationProperties'
 import { applySelectionMarkup, createTrackedMark, deleteAnnotationMark } from '@/features/pdf/annotationActions'
+import {
+  DEFAULT_HIGHLIGHT_HEX,
+  DEFAULT_HIGHLIGHT_OPACITY,
+  DEFAULT_UNDERLINE_HEX,
+  DEFAULT_UNDERLINE_THICKNESS,
+  displayHighlightColor,
+  highlightFill,
+  underlineCssColor,
+} from '@/services/annotations/appearance'
 import {
   isPdfGlyphTarget,
   markupPointerDownIntent,
@@ -74,6 +84,7 @@ export function PdfPage({
   const [height, setHeight] = useState(() => Math.round(width * aspect))
   const [useOcrOverlay, setUseOcrOverlay] = useState(false)
   const [draftRect, setDraftRect] = useState<NormalizedRect | null>(null)
+  const [annotMenu, setAnnotMenu] = useState<AnnotationMenuState | null>(null)
 
   const setSelection = useStudyStore((s) => s.setSelection)
   const setActiveAnnotation = useStudyStore((s) => s.setActiveAnnotation)
@@ -269,7 +280,7 @@ export function PdfPage({
     if (kind === 'line') {
       const from = clientToNormalized(start, box, rotation)
       const to = clientToNormalized(end, box, rotation)
-      const rect = horizontalLineFromDrag(from, to)
+      const rect = horizontalLineFromDrag(from, to, DEFAULT_UNDERLINE_THICKNESS)
       if (rect.w < 0.012) return
       void createTrackedMark({
         bookId,
@@ -280,7 +291,7 @@ export function PdfPage({
         pageRotation: rotation,
         pageWidth: pageRecord?.width ?? pdfPageWidth,
         pageHeight: pageRecord?.height ?? pdfPageHeight,
-        style: { strokeColor: '#6b5344', strokeWidth: 2 },
+        style: { strokeColor: DEFAULT_UNDERLINE_HEX, color: DEFAULT_UNDERLINE_HEX, strokeWidth: 1 },
       }).then((created) => recordMarkCreated(created))
       return
     }
@@ -295,7 +306,7 @@ export function PdfPage({
       pageRotation: rotation,
       pageWidth: pageRecord?.width ?? pdfPageWidth,
       pageHeight: pageRecord?.height ?? pdfPageHeight,
-      style: { fillColor: '#d8a13d', fillOpacity: 0.28 },
+      style: { fillColor: DEFAULT_HIGHLIGHT_HEX, fillOpacity: DEFAULT_HIGHLIGHT_OPACITY },
     }).then((created) => recordMarkCreated(created))
   }
 
@@ -327,10 +338,10 @@ export function PdfPage({
     if (!gesture || gesture.kind === 'select-text') return
     const box = pageBox()
     if (!box) return
-    if (gesture.kind === 'draw-line') {
+      if (gesture.kind === 'draw-line') {
       const start = clientToNormalized(gesture.start, box, rotation)
       const end = clientToNormalized({ x: event.clientX, y: event.clientY }, box, rotation)
-      setDraftRect(horizontalLineFromDrag(start, end))
+      setDraftRect(horizontalLineFromDrag(start, end, DEFAULT_UNDERLINE_THICKNESS))
       return
     }
     const rect = clientRectToNormalized(gesture.start, { x: event.clientX, y: event.clientY }, box, rotation, {
@@ -453,41 +464,73 @@ export function PdfPage({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onContextMenu={(event) => {
+        const box = pageBox()
+        if (!box) return
+        const x = (event.clientX - box.left) / box.width
+        const y = (event.clientY - box.top) / box.height
+        const hit = highlights.find((h) => {
+          const rects = h.annotation.kind === 'underline' ? underlineRectsForSelection(h.rects) : h.rects
+          return rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h)
+        })
+        if (!hit || (hit.annotation.kind !== 'highlight' && hit.annotation.kind !== 'underline')) return
+        event.preventDefault()
+        setActiveAnnotation(hit.annotation.id)
+        setAnnotMenu({
+          x: event.clientX,
+          y: event.clientY,
+          annotationId: hit.annotation.id,
+          kind: hit.annotation.kind,
+        })
+      }}
     >
       <canvas ref={canvasRef} aria-label={`Page ${pageNumber}`} />
 
       <div className="highlight-layer">
         {highlights.map(({ annotation, rects, degraded }) =>
-          (annotation.kind === 'underline' ? underlineRectsForSelection(rects) : rects).map((r, i) => (
-            <div
-              key={`${annotation.id}:${i}`}
-              className={[
-                annotation.kind === 'capture' ? 'hl-capture-region' : annotation.kind === 'underline' ? 'hl-underline' : 'hl',
-                annotation.kind === 'capture' || annotation.kind === 'underline' ? '' : `hl-${annotation.color}`,
-                annotation.kind === 'underline' ? `hl-underline-${annotation.color}` : '',
-                activeAnnotationId === annotation.id ? 'hl-active' : '',
-                pulseId === annotation.id ? 'hl-pulse' : '',
-                degraded ? 'opacity-60' : '',
-              ]
-                .filter(Boolean)
-                .join(' ')}
-              style={{
-                left: `${r.x * 100}%`,
-                top: `${r.y * 100}%`,
-                width: `${r.w * 100}%`,
-                height: `${r.h * 100}%`,
-              }}
-            />
-          )),
+          (annotation.kind === 'underline' ? underlineRectsForSelection(rects) : rects).map((r, i) => {
+            const paint = displayHighlightColor(annotation.kind, annotation.color)
+            const isUnderline = annotation.kind === 'underline'
+            const isHighlight = annotation.kind === 'highlight'
+            return (
+              <div
+                key={`${annotation.id}:${i}`}
+                className={[
+                  annotation.kind === 'capture' ? 'hl-capture-region' : isUnderline ? 'hl-underline' : 'hl',
+                  annotation.kind === 'capture' || isUnderline || isHighlight ? '' : `hl-${annotation.color}`,
+                  isUnderline ? `hl-underline-${paint}` : '',
+                  isHighlight ? `hl-${paint}` : '',
+                  activeAnnotationId === annotation.id ? 'hl-active' : '',
+                  pulseId === annotation.id ? 'hl-pulse' : '',
+                  degraded ? 'opacity-60' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')}
+                style={{
+                  left: `${r.x * 100}%`,
+                  top: `${r.y * 100}%`,
+                  width: `${r.w * 100}%`,
+                  height: `${r.h * 100}%`,
+                  ...(isHighlight
+                    ? { background: highlightFill(paint, annotation.opacity ?? DEFAULT_HIGHLIGHT_OPACITY) }
+                    : {}),
+                  ...(isUnderline ? { background: underlineCssColor(annotation.color) } : {}),
+                }}
+              />
+            )
+          }),
         )}
         {draftRect && (
           <div
-            className={pdfTool === 'underline' ? 'hl-underline hl-underline-amber' : 'hl hl-amber'}
+            className={pdfTool === 'underline' ? 'hl-underline hl-underline-ink' : 'hl hl-yellow'}
             style={{
               left: `${draftRect.x * 100}%`,
               top: `${draftRect.y * 100}%`,
               width: `${draftRect.w * 100}%`,
               height: `${draftRect.h * 100}%`,
+              ...(pdfTool === 'underline'
+                ? { background: DEFAULT_UNDERLINE_HEX }
+                : { background: highlightFill('yellow') }),
             }}
           />
         )}
@@ -514,6 +557,18 @@ export function PdfPage({
         <div className="text-ink-faint absolute inset-0 flex items-center justify-center text-xs">
           {pageNumber}
         </div>
+      )}
+
+      {annotMenu && (
+        <AnnotationMarkupMenu
+          menu={annotMenu}
+          color={
+            highlights.find((h) => h.annotation.id === annotMenu.annotationId)?.annotation.color ??
+            (annotMenu.kind === 'underline' ? 'ink' : 'yellow')
+          }
+          opacity={highlights.find((h) => h.annotation.id === annotMenu.annotationId)?.annotation.opacity}
+          onClose={() => setAnnotMenu(null)}
+        />
       )}
     </div>
   )

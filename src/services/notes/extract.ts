@@ -45,12 +45,19 @@ function shapeFor(kind: AnnotationKind): { shape: InsertShape; blockKind: string
  */
 export async function extractAndExplain(kind: AnnotationKind, selection: LiveSelection): Promise<void> {
   const study = useStudyStore.getState()
+  const color =
+    kind === 'highlight'
+      ? study.lastHighlightColor
+      : kind === 'underline'
+        ? study.lastUnderlineColor
+        : undefined
 
   const { annotation, anchor } = await AnnotationEngine.create({
     bookId: selection.bookId,
     documentId: selection.documentId,
     capture: selection.capture,
     kind,
+    color,
   })
 
   if (kind === 'highlight' || kind === 'underline') {

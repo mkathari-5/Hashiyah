@@ -226,9 +226,20 @@ describe('AnnotationEngine', () => {
       kind: 'underline',
     })
     expect(annotation.kind).toBe('underline')
+    expect(annotation.color).toBe('ink')
     expect(anchor.rects).toHaveLength(1)
     const resolved = await AnnotationEngine.resolve(annotation.id)
     expect(resolved?.resolution.strategy).toBe('exact')
     expect(await notesRepo.forBook(BOOK)).toHaveLength(0)
+  })
+
+  it('defaults a text highlighter to yellow', async () => {
+    const { annotation } = await AnnotationEngine.create({
+      bookId: BOOK,
+      documentId: DOC,
+      capture: captureAt(0),
+      kind: 'highlight',
+    })
+    expect(annotation.color).toBe('yellow')
   })
 })

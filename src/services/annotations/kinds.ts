@@ -18,7 +18,7 @@ export interface KindMeta {
  */
 export const KIND_META: Record<AnnotationKind, KindMeta> = {
   explain: { kind: 'explain', label: 'Explain', color: 'amber', block: null, shortcut: 'Mod+E' },
-  highlight: { kind: 'highlight', label: 'Highlight', color: 'amber', block: null, shortcut: 'Mod+H' },
+  highlight: { kind: 'highlight', label: 'Highlight', color: 'yellow', block: null, shortcut: 'Mod+H' },
   benefit: {
     kind: 'benefit',
     label: 'Fāʾidah',
@@ -65,7 +65,7 @@ export const KIND_META: Record<AnnotationKind, KindMeta> = {
   },
   important: { kind: 'important', label: 'Important', color: 'rose', block: 'important' },
   capture: { kind: 'capture', label: 'Captured region', color: 'neutral', block: null },
-  underline: { kind: 'underline', label: 'Underline', color: 'amber', block: null },
+  underline: { kind: 'underline', label: 'Underline', color: 'ink', block: null },
 }
 
 /** Menu order. Most-used first — this is the §71 requirement. */

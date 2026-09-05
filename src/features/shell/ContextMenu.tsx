@@ -6,6 +6,7 @@ export interface ContextMenuItem {
   label: string
   danger?: boolean
   disabled?: boolean
+  keepOpen?: boolean
   onSelect: () => void
 }
 
@@ -93,7 +94,7 @@ export function ContextMenu({
           className={`block-menu-item${item.danger ? ' is-danger' : ''}`}
           onClick={() => {
             item.onSelect()
-            onClose()
+            if (!item.keepOpen) onClose()
           }}
         >
           {item.label}

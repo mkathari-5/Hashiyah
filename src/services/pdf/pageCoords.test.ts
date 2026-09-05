@@ -8,7 +8,9 @@ import {
   movedRect,
   normalizedToClient,
   resizedRect,
+  resizedRectFromHandle,
   rotateRect,
+  textRectFromDrag,
   toDisplayPoint,
   underlineRectForLine,
   underlineRectsForSelection,
@@ -71,6 +73,14 @@ describe('pageCoords', () => {
     expect(rect.h).toBeGreaterThan(0.03)
   })
 
+  it('turns a click without a drag into the default typewriter size', () => {
+    const click = textRectFromDrag({ x: 140, y: 90 }, { x: 142, y: 91 }, PAGE, 0, 400, 800)
+    expect(click.w).toBeGreaterThan(0.15)
+    const dragged = textRectFromDrag({ x: 140, y: 90 }, { x: 300, y: 180 }, PAGE, 0, 400, 800)
+    expect(dragged.w).toBeCloseTo(0.4)
+    expect(dragged.h).toBeCloseTo(0.1125)
+  })
+
   it('turns each selection line into a baseline underline rather than one tall box', () => {
     const lines = [
       { x: 0.1, y: 0.2, w: 0.4, h: 0.04 },
@@ -78,16 +88,36 @@ describe('pageCoords', () => {
     ]
     const underlines = underlineRectsForSelection(lines)
     expect(underlines).toHaveLength(2)
-    expect(underlines[0]!.h).toBeLessThan(lines[0]!.h)
+    expect(underlines[0]!.h).toBeCloseTo(0.0012)
+    expect(underlines[0]!.h).toBeLessThan(0.002)
     expect(underlines[1]!.y).toBeGreaterThan(underlines[0]!.y)
-    expect(underlineRectForLine(lines[0]!).y).toBeCloseTo(underlines[0]!.y)
+    expect(underlineRectForLine(lines[0]!).y).toBeCloseTo(0.2 + 0.04 - 0.0012)
+  })
+
+  it('re-thins the previous oversized default without rewriting a custom hairline', () => {
+    const legacy = underlineRectForLine({ x: 0.1, y: 0.5, w: 0.4, h: 0.008 })
+    expect(legacy.h).toBeCloseTo(0.0012)
+    const custom = underlineRectForLine({ x: 0.1, y: 0.5, w: 0.4, h: 0.001 })
+    expect(custom.h).toBeCloseTo(0.001)
+    expect(custom.y).toBeCloseTo(0.5)
   })
 
   it('locks a manual underline to the start y so the stroke stays straight', () => {
     const line = horizontalLineFromDrag({ x: 0.2, y: 0.5 }, { x: 0.8, y: 0.72 })
     expect(line.y).toBeCloseTo(0.5 - line.h / 2)
     expect(line.w).toBeCloseTo(0.6)
-    expect(line.h).toBeLessThan(0.02)
+    expect(line.h).toBeCloseTo(0.0012)
+  })
+
+  it('resizes from any handle without inverting the box', () => {
+    const origin = { x: 0.2, y: 0.3, w: 0.2, h: 0.05 }
+    const fromWest = resizedRectFromHandle(origin, { x: 180, y: 290 }, { x: 140, y: 290 }, PAGE, 0, 'w')
+    expect(fromWest.x).toBeCloseTo(0.1)
+    expect(fromWest.w).toBeCloseTo(0.3)
+    expect(fromWest.h).toBeCloseTo(0.05)
+    const fromNorth = resizedRectFromHandle(origin, { x: 180, y: 290 }, { x: 180, y: 250 }, PAGE, 0, 'n')
+    expect(fromNorth.y).toBeCloseTo(0.25)
+    expect(fromNorth.h).toBeCloseTo(0.1)
   })
 
   it('moves a text box in page space without using the mark CSS size as a divisor', () => {
