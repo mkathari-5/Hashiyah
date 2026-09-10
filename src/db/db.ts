@@ -158,6 +158,16 @@ export class HashiyahDB extends Dexie {
       pdfNoteLinks:
         'id, pdfDocumentId, noteDocumentId, noteBlockId, annotationId, [pdfDocumentId+pageNumber], [noteDocumentId+noteBlockId]',
     })
+
+    /**
+     * v7 — additive only. Indexes Book/PDF attachment references on library
+     * page blocks. Existing rows keep their data; new `bookId` / `documentId`
+     * fields are optional and never rewrite notes, PDFs or study nodes.
+     */
+    this.version(7).stores({
+      libraryBlocks:
+        'id, pageId, parentBlockId, [pageId+parentBlockId], libraryNodeId, bookId, documentId, order',
+    })
   }
 }
 

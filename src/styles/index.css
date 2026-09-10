@@ -1895,7 +1895,8 @@ svg.block-menu-icon {
 }
 .page-block-study,
 .page-block-page,
-.page-block-divider {
+.page-block-divider,
+.page-block-book {
   cursor: pointer;
 }
 
@@ -2056,6 +2057,129 @@ svg.block-menu-icon {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.book-pdf-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1;
+  min-width: 0;
+  margin: 0.1rem 0.15rem 0.1rem 0;
+  padding: 0.45rem 0.55rem 0.45rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+.book-pdf-card.is-empty {
+  border-style: dashed;
+  background: transparent;
+}
+.book-pdf-main {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  flex: 1;
+  text-align: start;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+.book-pdf-icon {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 0.35rem;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.book-pdf-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.05rem;
+}
+.book-pdf-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.book-pdf-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.book-pdf-open {
+  flex-shrink: 0;
+  height: 1.7rem;
+  padding: 0 0.65rem;
+  border-radius: var(--radius-small);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.book-pdf-open:hover,
+.book-pdf-main:hover .book-pdf-title {
+  color: var(--accent);
+}
+.book-pdf-rename {
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+}
+.book-attach-picker {
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+  padding-bottom: 0.4rem;
+}
+.book-attach-heading {
+  padding: 0.7rem 0.85rem 0.25rem;
+  font-size: 12px;
+  font-weight: 650;
+}
+.book-attach-sub {
+  padding: 0.55rem 0.85rem 0.2rem;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.book-attach-search {
+  display: block;
+  width: calc(100% - 1.4rem);
+  margin: 0 0.7rem 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: inherit;
+  font-size: 12px;
+}
+.book-attach-list {
+  max-height: 14rem;
+  overflow: auto;
+}
+.book-attach-cancel {
+  display: block;
+  width: calc(100% - 1.4rem);
+  margin: 0.4rem 0.7rem 0.35rem;
+  padding: 0.35rem;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .page-block-input {

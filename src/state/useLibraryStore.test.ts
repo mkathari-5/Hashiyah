@@ -61,6 +61,7 @@ async function seedLibrary() {
 beforeEach(async () => {
   await Dexie.waitFor(db.open())
   await Promise.all(db.tables.map((t) => t.clear()))
+  window.location.hash = ''
   useLibraryStore.setState({ activeNodeId: null, hydrated: false })
   useStudyStore.setState({ bookId: null, documentId: null, activeNoteId: null, currentPage: 1 })
 })
@@ -136,6 +137,7 @@ describe('Continue Studying', () => {
     useStudyStore.getState().persistPosition(0.4)
 
     // A fresh start: nothing in memory, everything on disk.
+    window.location.hash = ''
     useLibraryStore.setState({ activeNodeId: null, hydrated: false })
     useStudyStore.setState({ bookId: null, documentId: null, activeNoteId: null, currentPage: 1 })
 
@@ -157,6 +159,23 @@ describe('Continue Studying', () => {
     useLibraryStore.setState({ activeNodeId: null, hydrated: false })
     await useLibraryStore.getState().hydrate()
 
+    expect(useLibraryStore.getState().activeNodeId).toBeNull()
+    expect(useLibraryStore.getState().hydrated).toBe(true)
+  })
+
+  it('opens a direct study link by stable id after persisted data is present', async () => {
+    const { three } = await seedLibrary()
+    window.location.hash = `#/study/${three.id}`
+    useLibraryStore.setState({ activeNodeId: null, hydrated: false })
+    await useLibraryStore.getState().hydrate()
+    expect(useLibraryStore.getState().activeNodeId).toBe(three.id)
+    expect(useStudyStore.getState().bookId).toBe(BOOK)
+  })
+
+  it('does not invent a session for a missing direct link', async () => {
+    await seedLibrary()
+    window.location.hash = '#/study/lib_gone'
+    await useLibraryStore.getState().hydrate()
     expect(useLibraryStore.getState().activeNodeId).toBeNull()
     expect(useLibraryStore.getState().hydrated).toBe(true)
   })

@@ -10,11 +10,14 @@ import { LibraryHome } from '@/features/library/LibraryHome'
 import { LibraryEditor } from '@/features/library/LibraryEditor'
 import { LIBRARY_BLOCK_CATALOGUE, PREVIOUS_LIBRARY_TITLE } from '@/features/library/libraryPageModel'
 import type { TitleEditorHost } from '@/features/library/TitleInlineEditor'
+import { attachPdfToHost } from '@/services/library/bookAttachment'
 import { useLibraryStore } from '@/state/useLibraryStore'
+import { useStudyStore } from '@/state/useStudyStore'
 
 beforeEach(async () => {
   await Dexie.waitFor(db.open())
   await Promise.all(db.tables.map((t) => t.clear()))
+  window.location.hash = ''
   useLibraryStore.setState({ activeNodeId: null })
 })
 
@@ -308,6 +311,118 @@ describe('Library page editor', () => {
     useLibraryStore.setState({ activeNodeId: null })
     fireEvent.click(screen.getByLabelText('Page title'))
     expect(useLibraryStore.getState().activeNodeId).toBeNull()
+  })
+
+  it('opens the Book/PDF picker from /book and creates nothing on cancel', async () => {
+    const first = await editorReady()
+    fill(first, '/book')
+    await screen.findByTestId('slash-menu')
+    pressEnter(first)
+    expect(await screen.findByTestId('book-attach-picker')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(screen.queryByTestId('book-attach-picker')).toBeNull()
+    expect(await stored()).toHaveLength(0)
+  })
+
+  it('attaches an already imported PDF from the /book picker', async () => {
+    await db.books.add({
+      id: 'bk_existing',
+      subjectId: null,
+      title: 'usul-ath-thalathah-fixture',
+      language: 'en',
+      pageCount: 5,
+      tags: [],
+      favorite: false,
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: null,
+    })
+    await db.documents.add({
+      id: 'doc_existing',
+      bookId: 'bk_existing',
+      filename: 'usul.pdf',
+      byteLength: 4,
+      fingerprint: 'fp_existing',
+      pageCount: 5,
+      createdAt: 1,
+    })
+    const host = await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      type: 'toggle',
+      content: 'Manhaj as-Salikeen',
+      expanded: true,
+    })
+    render(<LibraryHome onImport={() => undefined} />)
+    await screen.findByText('Manhaj as-Salikeen')
+    const nested = await waitFor(() => emptyByLabel('Text', host.id))
+    fill(nested, '/pdf')
+    await screen.findByTestId('slash-menu')
+    pressEnter(nested)
+    expect(await screen.findByTestId('book-attach-picker')).toBeInTheDocument()
+    const option = await waitFor(() =>
+      within(screen.getByTestId('book-attach-picker')).getByRole('option', { name: /usul-ath-thalathah-fixture/ }),
+    )
+    fireEvent.mouseDown(option)
+    fireEvent.click(option)
+    const card = await screen.findByTestId('book-pdf-block')
+    expect(card).toHaveAttribute('data-book-id', 'bk_existing')
+    expect(card).toHaveAttribute('data-document-id', 'doc_existing')
+    const pdf = (await stored()).find((row) => row.type === 'book')
+    expect(pdf?.parentBlockId).toBe(host.id)
+    expect(pdf?.bookId).toBe('bk_existing')
+  })
+
+  it('opens the study workspace from a Book/PDF block and a nested chapter', async () => {
+    await db.books.add({
+      id: 'bk_manhaj',
+      subjectId: null,
+      title: 'Manhaj as-Salikeen',
+      language: 'en',
+      pageCount: 20,
+      tags: [],
+      favorite: false,
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: null,
+    })
+    await db.documents.add({
+      id: 'doc_manhaj',
+      bookId: 'bk_manhaj',
+      filename: 'manhaj.pdf',
+      byteLength: 4,
+      fingerprint: 'fp_manhaj',
+      pageCount: 20,
+      createdAt: 1,
+    })
+    await editorReady()
+    const attached = await attachPdfToHost({
+      bookId: 'bk_manhaj',
+      documentId: 'doc_manhaj',
+      createHostToggle: true,
+      hostTitle: 'Manhaj as-Salikeen',
+    })
+    await libraryBlocksRepo.create({
+      pageId: ROOT_LIBRARY_PAGE_ID,
+      parentBlockId: attached!.host!.id,
+      type: 'toggle',
+      content: 'Kitab at-Taharah',
+    })
+
+    const openBook = await screen.findByRole('button', { name: 'Open book Manhaj as-Salikeen' })
+    fireEvent.click(openBook)
+    await waitFor(() => expect(useLibraryStore.getState().activeNodeId).toBe(attached!.node.id))
+    expect(useStudyStore.getState().bookId).toBe('bk_manhaj')
+
+    useLibraryStore.setState({ activeNodeId: null })
+    fireEvent.click(screen.getByRole('button', { name: 'Open Kitab at-Taharah' }))
+    await waitFor(() => {
+      expect(useLibraryStore.getState().activeNodeId).toBeTruthy()
+    })
+    const opened = await libraryRepo.get(useLibraryStore.getState().activeNodeId!)
+    expect(opened?.title).toBe('Kitab at-Taharah')
+    expect(useStudyStore.getState().bookId).toBe('bk_manhaj')
   })
 
   it('does not duplicate records under React Strict Mode', async () => {

@@ -5,6 +5,7 @@ import { notesRepo } from '@/db/repos/notes'
 import { normalizeForSearch } from '@/lib/arabic'
 import { quickNoteAtCurrentPosition } from '@/services/notes/extract'
 import { exportNote } from '@/services/export/ExportEngine'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { useAppStore } from '@/state/useAppStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import { Icon, type IconName } from '@/features/shell/Icon'
@@ -32,7 +33,6 @@ export function CommandPalette({ onImport }: { onImport: () => void }) {
   const bookId = useStudyStore((s) => s.bookId)
   const activeNoteId = useStudyStore((s) => s.activeNoteId)
   const pageCount = useStudyStore((s) => s.pageCount)
-  const openBook = useStudyStore((s) => s.openBook)
   const setPage = useStudyStore((s) => s.setPage)
   const setActiveNote = useStudyStore((s) => s.setActiveNote)
 
@@ -130,7 +130,7 @@ export function CommandPalette({ onImport }: { onImport: () => void }) {
       hint: b.arabicTitle,
       group: 'Open book',
       icon: 'book',
-      run: close(() => openBook(b.id)),
+      run: close(() => void openStudyWorkspace({ bookId: b.id, forceThreePane: true })),
     }))
 
     return [...actions, ...bookCommands]
@@ -139,7 +139,6 @@ export function CommandPalette({ onImport }: { onImport: () => void }) {
     bookId,
     activeNoteId,
     onImport,
-    openBook,
     resetSizes,
     setActiveNote,
     setLayout,

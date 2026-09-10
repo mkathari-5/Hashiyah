@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { subjectsRepo } from '@/db/repos/library'
+import { attachPdfToHost, listHomepageSections } from '@/services/library/bookAttachment'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { importPdf, indexDocument, type ImportProgress } from '@/services/pdf/importer'
-import { useStudyStore } from '@/state/useStudyStore'
 import { Icon } from '@/features/shell/Icon'
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
   onPickFile: (file: File) => void
 }
 
+type Destination = 'new' | 'existing' | 'unattached'
+
 /**
  * Import (§50): infer what can safely be inferred, let the user correct it, and
  * never block opening the book on metadata. Text indexing starts in the
@@ -19,13 +22,15 @@ interface Props {
  */
 export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
   const subjects = useLiveQuery(() => subjectsRepo.all(), [], [])
-  const openBook = useStudyStore((s) => s.openBook)
+  const sections = useLiveQuery(() => listHomepageSections(), [], [])
   const inputRef = useRef<HTMLInputElement>(null)
 
   const [title, setTitle] = useState('')
   const [arabicTitle, setArabicTitle] = useState('')
   const [author, setAuthor] = useState('')
   const [subjectId, setSubjectId] = useState<string>('')
+  const [destination, setDestination] = useState<Destination>('new')
+  const [sectionId, setSectionId] = useState('')
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<ImportProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +43,8 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
     setError(null)
     setProgress(null)
     setBusy(false)
+    setDestination('new')
+    setSectionId('')
   }, [open, file])
 
   if (!open) return null
@@ -54,9 +61,26 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
         author: author || undefined,
         onProgress: setProgress,
       })
-      // Reading can start immediately; indexing continues behind it.
       indexDocument(result.document.id, result.book.id, setProgress)
-      await openBook(result.book.id)
+
+      if (destination === 'unattached') {
+        onClose()
+        return
+      }
+
+      const attached = await attachPdfToHost({
+        bookId: result.book.id,
+        documentId: result.document.id,
+        hostBlockId: destination === 'existing' ? sectionId || null : null,
+        hostTitle: title || result.book.title,
+        createHostToggle: destination === 'new',
+      })
+      if (attached) {
+        await openStudyWorkspace({
+          libraryItemId: attached.node.id,
+          forceThreePane: true,
+        })
+      }
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'This file could not be imported.')
@@ -112,6 +136,51 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
                   ))}
                 </select>
               </label>
+              <fieldset className="space-y-1.5">
+                <legend className="text-ink-muted mb-1 block text-[11px]">Library</legend>
+                <label className="text-ink flex items-center gap-2 text-xs">
+                  <input
+                    type="radio"
+                    name="import-destination"
+                    checked={destination === 'new'}
+                    onChange={() => setDestination('new')}
+                  />
+                  Create a new Library book entry
+                </label>
+                <label className="text-ink flex items-center gap-2 text-xs">
+                  <input
+                    type="radio"
+                    name="import-destination"
+                    checked={destination === 'existing'}
+                    onChange={() => setDestination('existing')}
+                  />
+                  Add to an existing Library section
+                </label>
+                {destination === 'existing' && (
+                  <select
+                    value={sectionId}
+                    onChange={(e) => setSectionId(e.target.value)}
+                    className="border-line bg-panel text-ink w-full rounded border px-2 py-1.5 text-xs"
+                    aria-label="Existing Library section"
+                  >
+                    <option value="">Choose a section</option>
+                    {sections.map((block) => (
+                      <option key={block.id} value={block.id}>
+                        {block.content || 'Untitled'}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <label className="text-ink flex items-center gap-2 text-xs">
+                  <input
+                    type="radio"
+                    name="import-destination"
+                    checked={destination === 'unattached'}
+                    onChange={() => setDestination('unattached')}
+                  />
+                  Leave unattached — attach later
+                </label>
+              </fieldset>
             </div>
           </>
         )}
@@ -146,10 +215,10 @@ export function ImportDialog({ file, open, onClose, onPickFile }: Props) {
           </button>
           <button
             onClick={runImport}
-            disabled={!file || busy}
+            disabled={!file || busy || (destination === 'existing' && !sectionId)}
             className="ui-btn ui-btn-primary"
           >
-            {busy ? 'Importing…' : 'Import and open'}
+            {busy ? 'Importing…' : destination === 'unattached' ? 'Import' : 'Import and open'}
           </button>
         </div>
       </div>

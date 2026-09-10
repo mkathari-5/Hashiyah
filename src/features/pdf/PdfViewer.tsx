@@ -3,6 +3,9 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { booksRepo } from '@/db/repos/library'
 import { anchorsRepo } from '@/db/repos/annotations'
 import { pageMarksRepo } from '@/db/repos/pageMarks'
+import { libraryBlocksRepo, ROOT_LIBRARY_PAGE_ID } from '@/db/repos/libraryPages'
+import { libraryRepo } from '@/db/repos/libraryTree'
+import { BookAttachPicker, type BookAttachChoice } from '@/features/library/BookAttachPicker'
 import { AnnotationToolbar } from '@/features/pdf/AnnotationToolbar'
 import { PageMarkLayer } from '@/features/pdf/PageMarkLayer'
 import { PdfNoteLinkLayer } from '@/features/pdf/PdfNoteLinkLayer'
@@ -12,7 +15,10 @@ import { NoteTargetPicker } from '@/features/pdf/NoteTargetPicker'
 import { SnipOverlay } from '@/features/pdf/SnipOverlay'
 import { usePdfDocument } from '@/features/pdf/usePdfDocument'
 import { isTypingContext } from '@/features/shortcuts/typingContext'
+import { attachPdfToHost, attachUploadedPdf } from '@/services/library/bookAttachment'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { OcrScheduler } from '@/services/ocr/OcrScheduler'
+import { useLibraryStore } from '@/state/useLibraryStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { PageTextContext } from '@/services/annotations/selection'
 import { Icon } from '@/features/shell/Icon'
@@ -28,6 +34,7 @@ const MAX_ZOOM = 4
 
 export function PdfViewer() {
   const bookId = useStudyStore((s) => s.bookId)
+  const activeNodeId = useLibraryStore((s) => s.activeNodeId)
   const documentId = useStudyStore((s) => s.documentId)
   const currentPage = useStudyStore((s) => s.currentPage)
   const zoom = useStudyStore((s) => s.zoom)
@@ -341,10 +348,10 @@ export function PdfViewer() {
     panRef.current = null
   }
 
-  if (!bookId) return <EmptyReader />
+  if (!bookId) return <MissingPdfState nodeId={activeNodeId} missingFile={false} />
   if (loading) return <ReaderMessage>Opening…</ReaderMessage>
-  if (error) return <ReaderMessage tone="error">{error}</ReaderMessage>
-  if (!handle) return <ReaderMessage>This book has no document attached.</ReaderMessage>
+  if (error) return <MissingPdfState nodeId={activeNodeId} missingFile message={error} />
+  if (!handle) return <MissingPdfState nodeId={activeNodeId} missingFile={false} />
 
   return (
     <div className="relative flex h-full min-w-0 flex-col">
@@ -626,6 +633,70 @@ function EmptyReader() {
       </p>
     </div>
   )
+}
+
+function MissingPdfState({
+  nodeId,
+  missingFile,
+  message,
+}: {
+  nodeId: string | null
+  missingFile: boolean
+  message?: string
+}) {
+  const [picker, setPicker] = useState(false)
+  if (!nodeId && !missingFile) return <EmptyReader />
+
+  return (
+    <div className="empty-state">
+      <p className={`empty-state-line ${missingFile ? 'text-hl-rose' : ''}`}>
+        {missingFile
+          ? message || 'This PDF is missing from storage.'
+          : 'No PDF is attached to this book. Attach a PDF to begin reading.'}
+      </p>
+      <p className="empty-state-hint">The notes beside this book are unaffected.</p>
+      {nodeId && (
+        <button type="button" className="ui-btn ui-btn-primary mt-4" onClick={() => setPicker(true)}>
+          Attach a PDF
+        </button>
+      )}
+      {picker && nodeId && (
+        <BookAttachPicker
+          title={missingFile ? 'Replace this PDF' : 'Attach a PDF'}
+          onChoose={(choice) => {
+            setPicker(false)
+            void attachPdfToOpenNode(nodeId, choice)
+          }}
+          onClose={() => setPicker(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+async function attachPdfToOpenNode(nodeId: string, choice: BookAttachChoice) {
+  const node = await libraryRepo.get(nodeId)
+  const hostBlocks = node
+    ? (await libraryBlocksRepo.forPage(ROOT_LIBRARY_PAGE_ID)).filter((row) => row.libraryNodeId === node.id)
+    : []
+  const hostId = hostBlocks.find((row) => row.type !== 'book')?.id ?? hostBlocks[0]?.parentBlockId ?? null
+  if (choice.kind === 'upload') {
+    await attachUploadedPdf({
+      file: choice.file,
+      hostBlockId: hostId,
+      createHostToggle: !hostId,
+      hostTitle: node?.title,
+    })
+  } else {
+    await attachPdfToHost({
+      bookId: choice.bookId,
+      documentId: choice.documentId,
+      hostBlockId: hostId,
+      createHostToggle: !hostId,
+      hostTitle: node?.title,
+    })
+  }
+  await openStudyWorkspace({ libraryItemId: nodeId, forceThreePane: true, history: 'none' })
 }
 
 export function Kbd({ children }: { children: React.ReactNode }) {

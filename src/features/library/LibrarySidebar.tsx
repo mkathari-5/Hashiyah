@@ -70,7 +70,7 @@ export function LibrarySidebar({ onImport }: { onImport: () => void }) {
     <div className="flex h-full min-h-0 flex-col">
       <div className="border-line flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <button
-          onClick={showLibrary}
+          onClick={() => showLibrary()}
           title="Back to the library"
           className="hover:bg-hover text-ink-muted hover:text-ink flex h-7 flex-1 items-center gap-1.5 rounded-[var(--radius-small)] px-1.5 text-[11px] font-semibold tracking-wide uppercase"
         >

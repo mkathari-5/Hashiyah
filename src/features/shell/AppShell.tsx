@@ -11,6 +11,8 @@ import { ShortcutsDialog } from '@/features/shell/ShortcutsDialog'
 import { StatusBar } from '@/features/shell/StatusBar'
 import { TopBar } from '@/features/shell/TopBar'
 import { useShortcuts } from '@/features/shortcuts/useShortcuts'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
+import { readWorkspaceHistory } from '@/services/library/workspaceHistory'
 import { useAppStore } from '@/state/useAppStore'
 import { useLibraryStore } from '@/state/useLibraryStore'
 
@@ -28,6 +30,19 @@ export function AppShell() {
   const [dragging, setDragging] = useState(false)
 
   useShortcuts()
+
+  useEffect(() => {
+    const onPop = (event: PopStateEvent) => {
+      const payload = readWorkspaceHistory(event.state)
+      if (!payload || payload.view === 'library' || !payload.nodeId) {
+        useLibraryStore.getState().showLibrary('none')
+        return
+      }
+      void openStudyWorkspace({ libraryItemId: payload.nodeId, history: 'none', forceThreePane: true })
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
 
   const openImport = useCallback(() => {
     setImportFile(null)

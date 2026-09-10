@@ -1,5 +1,6 @@
 import { useRef, type CSSProperties } from 'react'
 import type { LibraryBlock } from '@/types'
+import { BookPdfBlock } from '@/features/library/BookPdfBlock'
 import { Icon } from '@/features/shell/Icon'
 import { RichTitleView } from '@/features/library/RichTitleView'
 import { TitleInlineEditor } from '@/features/library/TitleInlineEditor'
@@ -19,6 +20,7 @@ export function LibraryBlockRow({
   focused,
   focusCaret,
   gutterOn,
+  opensWorkspace,
   onHover,
   onFocus,
   onChange,
@@ -27,6 +29,7 @@ export function LibraryBlockRow({
   onToggle,
   onOpenStudy,
   onOpenPage,
+  onOpenWorkspace,
   onTodo,
   onInsert,
   onContextMenu,
@@ -34,6 +37,11 @@ export function LibraryBlockRow({
   onDragOver,
   onDrop,
   onDragEnd,
+  onAttachBook,
+  onRenameBook,
+  onReplaceBook,
+  onDetachBook,
+  onDeleteBook,
   dragging,
   dropTarget,
 }: {
@@ -43,6 +51,7 @@ export function LibraryBlockRow({
   focused: boolean
   focusCaret: 'start' | 'end'
   gutterOn: boolean
+  opensWorkspace: boolean
   onHover: (id: string | null) => void
   onFocus: (id: string) => void
   onChange: (id: string, content: string, caret: number, rich: RichInlineDoc | null) => void
@@ -51,6 +60,7 @@ export function LibraryBlockRow({
   onToggle: (id: string) => void
   onOpenStudy: (nodeId: string) => void
   onOpenPage: (pageId: string) => void
+  onOpenWorkspace: (id: string) => void
   onTodo: (id: string, checked: boolean) => void
   onInsert: (id: string, anchor: HTMLElement) => void
   onContextMenu?: (id: string, event: React.MouseEvent) => void
@@ -58,6 +68,11 @@ export function LibraryBlockRow({
   onDragOver: (id: string, event: React.DragEvent) => void
   onDrop: (id: string) => void
   onDragEnd: () => void
+  onAttachBook: (id: string) => void
+  onRenameBook: (id: string, title: string) => void
+  onReplaceBook: (id: string, file: File) => void
+  onDetachBook: (id: string) => void
+  onDeleteBook: (id: string) => void
   dragging: boolean
   dropTarget: boolean
 }) {
@@ -84,8 +99,12 @@ export function LibraryBlockRow({
       onMouseLeave={() => onHover(null)}
       onClick={(event) => {
         const target = event.target as HTMLElement
-        if (target.closest('button, input[type="checkbox"], a, [data-title-editor], .title-pm')) return
-        if (block.type === 'study' || block.type === 'page' || block.type === 'divider') return
+        if (target.closest('button, input[type="checkbox"], a, [data-title-editor], .title-pm, .book-pdf-card')) return
+        if (block.type === 'study' || block.type === 'page' || block.type === 'divider' || block.type === 'book') return
+        if (opensWorkspace) {
+          onOpenWorkspace(block.id)
+          return
+        }
         onFocus(block.id)
       }}
       onContextMenu={(event) => {
@@ -171,10 +190,21 @@ export function LibraryBlockRow({
         )}
         {block.type === 'page' && <Icon name="file" className="page-block-type-icon" />}
         {block.type === 'study' && <Icon name="book" className="page-block-type-icon" />}
+        {block.type === 'book' && <Icon name="file" className="page-block-type-icon" />}
       </div>
 
       {block.type === 'divider' ? (
         <hr className="page-block-rule" />
+      ) : block.type === 'book' ? (
+        <BookPdfBlock
+          block={block}
+          onOpen={() => onOpenWorkspace(block.id)}
+          onAttach={() => onAttachBook(block.id)}
+          onRename={(title) => onRenameBook(block.id, title)}
+          onReplace={(file) => onReplaceBook(block.id, file)}
+          onDetach={() => onDetachBook(block.id)}
+          onDelete={() => onDeleteBook(block.id)}
+        />
       ) : block.type === 'study' ? (
         <button
           type="button"
@@ -191,7 +221,7 @@ export function LibraryBlockRow({
         >
           <span className="page-block-page-title">{block.content || 'Page'}</span>
         </button>
-      ) : focused || isTransient ? (
+      ) : focused || (isTransient && !opensWorkspace) ? (
         <TitleInlineEditor
           key={block.id}
           id={block.id}
@@ -215,10 +245,21 @@ export function LibraryBlockRow({
           className={`page-block-input page-block-input-${block.type} is-idle`}
           data-plain={block.content}
           data-placeholder={placeholder}
-          aria-label={ariaLabel}
+          aria-label={opensWorkspace ? `Open ${block.content || ariaLabel}` : ariaLabel}
           title={block.content || undefined}
-          onClick={() => onFocus(block.id)}
+          onClick={() => (opensWorkspace ? onOpenWorkspace(block.id) : onFocus(block.id))}
+          onDoubleClick={(event) => {
+            if (!opensWorkspace) return
+            event.preventDefault()
+            event.stopPropagation()
+            onFocus(block.id)
+          }}
           onKeyDown={(event) => {
+            if (opensWorkspace && (event.key === 'Enter' || event.key === ' ')) {
+              event.preventDefault()
+              onOpenWorkspace(block.id)
+              return
+            }
             const handled = onKeyDown(
               block.id,
               event.nativeEvent,

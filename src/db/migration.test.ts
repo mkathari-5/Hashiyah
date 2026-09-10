@@ -174,7 +174,7 @@ describe('schema v1 → current', () => {
 
     // Deliberately not pinned to a number: this test guards the *data*, and
     // should keep passing as new additive versions are added.
-    expect(db.verno).toBeGreaterThanOrEqual(2)
+    expect(db.verno).toBeGreaterThanOrEqual(7)
 
     // Nothing lost.
     expect(await db.books.count()).toBe(1)

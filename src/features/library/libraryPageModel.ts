@@ -34,7 +34,8 @@ export const LIBRARY_BLOCK_CATALOGUE: BlockDef[] = [
   { id: 'todo', title: 'To-do', icon: '☑', keywords: ['todo', 'to-do', 'to do', 'check', 'task'] },
   { id: 'quote', title: 'Quote', icon: '❝', keywords: ['quote', 'blockquote', 'citation'] },
   { id: 'divider', title: 'Divider', icon: '—', keywords: ['divider', 'line', 'separator', 'hr'] },
-  { id: 'study', title: 'Study page', icon: '▣', keywords: ['study', 'page', 'item', 'book', 'note'] },
+  { id: 'study', title: 'Study page', icon: '▣', keywords: ['study', 'page', 'item', 'note'] },
+  { id: 'book', title: 'Book / PDF — Upload or attach a PDF book', icon: '▤', keywords: ['book', 'pdf', 'file', 'attachment', 'upload', 'document'] },
   { id: 'page', title: 'Page', icon: '▣', keywords: ['page', 'subpage', 'archive'] },
 ]
 
@@ -79,8 +80,9 @@ export function stripSlashQuery(content: string): string {
   return content.replace(/(?:^|\n)\/[^\n]*$/, (chunk) => (chunk.startsWith('\n') ? '\n' : '')).replace(/\n$/, '')
 }
 
-export function isPersistableBlock(block: Pick<LibraryBlock, 'type' | 'content' | 'libraryNodeId' | 'targetPageId'>): boolean {
+export function isPersistableBlock(block: Pick<LibraryBlock, 'type' | 'content' | 'libraryNodeId' | 'targetPageId' | 'bookId' | 'documentId'>): boolean {
   if (block.type === 'divider' || block.type === 'study' || block.type === 'page') return true
+  if (block.type === 'book') return !!(block.bookId || block.documentId || block.libraryNodeId)
   if (slashQueryFrom(block.content) !== null) return false
   return block.content.trim().length > 0
 }
@@ -303,14 +305,26 @@ export function visibleBlockIds(blocks: LibraryBlock[], parentId: string | null 
   for (const block of childrenOf(blocks, parentId)) {
     out.push(block.id)
     if (block.type === 'toggle' && !block.expanded) continue
-    if (block.type === 'page') continue
+    if (block.type === 'page' || block.type === 'book') continue
     out.push(...visibleBlockIds(blocks, block.id))
   }
   return out
 }
 
 export function isTextLike(type: LibraryBlockType): boolean {
-  return type !== 'divider' && type !== 'study' && type !== 'page'
+  return type !== 'divider' && type !== 'study' && type !== 'page' && type !== 'book'
+}
+
+/** Titles that participate in the study outline rather than free writing. */
+export function isStructuralLibraryType(type: LibraryBlockType): boolean {
+  return (
+    type === 'toggle' ||
+    type === 'heading1' ||
+    type === 'heading2' ||
+    type === 'heading3' ||
+    type === 'study' ||
+    type === 'book'
+  )
 }
 
 export function canMergeWith(previous: LibraryBlock, current: LibraryBlock): boolean {
@@ -326,6 +340,7 @@ export function placeholderFor(type: LibraryBlockType, opts?: { focused?: boolea
   if (type === 'todo') return active ? 'To-do' : ''
   if (type === 'bullet' || type === 'numbered') return active ? 'List' : ''
   if (type === 'page') return active ? 'Page' : ''
+  if (type === 'book') return 'Book / PDF'
   return active ? "Type '/' for commands" : ''
 }
 

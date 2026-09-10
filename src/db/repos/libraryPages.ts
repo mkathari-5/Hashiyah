@@ -26,6 +26,9 @@ export interface CreateBlockInput {
   checked?: boolean
   libraryNodeId?: string | null
   targetPageId?: string | null
+  bookId?: string | null
+  documentId?: string | null
+  noteBlockId?: string | null
 }
 
 function sortBlocks(rows: LibraryBlock[]): LibraryBlock[] {
@@ -85,6 +88,10 @@ export const libraryBlocksRepo = {
   forPage: (pageId: string) =>
     db.libraryBlocks.where('pageId').equals(pageId).toArray().then(sortBlocks),
 
+  forBook: (bookId: string) => db.libraryBlocks.where('bookId').equals(bookId).toArray(),
+
+  forDocument: (documentId: string) => db.libraryBlocks.where('documentId').equals(documentId).toArray(),
+
   children: (pageId: string, parentBlockId: string | null) =>
     db.libraryBlocks
       .where('pageId')
@@ -130,6 +137,9 @@ export const libraryBlocksRepo = {
       checked: input.checked,
       libraryNodeId: input.libraryNodeId ?? null,
       targetPageId: input.targetPageId ?? null,
+      bookId: input.bookId ?? null,
+      documentId: input.documentId ?? null,
+      noteBlockId: input.noteBlockId ?? null,
       createdAt: now,
       updatedAt: now,
     }

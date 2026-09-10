@@ -80,6 +80,8 @@ interface StudyState {
   persistPosition: (scrollRatio: number) => void
   startLessonTimer: () => void
   stopLessonTimer: () => void
+  /** Leave the PDF panel empty without clearing the open notes document. */
+  clearPdf: () => void
   setSnipMode: (mode: SnipMode) => void
   setPdfTool: (tool: PdfTool) => void
   setPageRotation: (rotation: 0 | 90 | 180 | 270) => void
@@ -173,6 +175,22 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       editingMarkId: null,
       selectedPdfNoteLinkId: null,
       linkDraft: null,
+    }),
+
+  clearPdf: () =>
+    set({
+      bookId: null,
+      documentId: null,
+      pageCount: 0,
+      currentPage: 1,
+      restoredScrollRatio: null,
+      selection: null,
+      activeAnnotationId: null,
+      selectedMarkId: null,
+      editingMarkId: null,
+      selectedPdfNoteLinkId: null,
+      linkDraft: null,
+      jumpRequest: null,
     }),
 
   setPage(page) {

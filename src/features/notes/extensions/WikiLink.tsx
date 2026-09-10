@@ -6,6 +6,7 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from 'react'
 import { db } from '@/db/db'
 import { normalizeForSearch } from '@/lib/arabic'
 import { displayTitle } from '@/lib/bookTitle'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { LinkTargetType } from '@/types'
 
@@ -241,7 +242,7 @@ export function handleWikiLinkClick(event: MouseEvent): boolean {
   const type = el.dataset.targetType
   const id = el.dataset.targetId
   if (!id) return true // Unresolved: swallow the click rather than doing nothing surprising.
-  if (type === 'book') void useStudyStore.getState().openBook(id)
+  if (type === 'book') void openStudyWorkspace({ bookId: id, forceThreePane: true })
   else if (type === 'note') useStudyStore.getState().setActiveNote(id)
   return true
 }

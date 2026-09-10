@@ -114,7 +114,8 @@ export async function inspectBlockDeletion(id: string): Promise<DeleteImpact | n
   if (!block) return null
   const descendants = await libraryBlocksRepo.descendants(id)
   const nestedCount = descendants.length
-  const linked = !!(block.libraryNodeId || block.targetPageId)
+  const linked = !!(block.libraryNodeId || block.targetPageId || block.bookId || block.documentId || block.type === 'book')
+  const hasPdf = block.type === 'book' || !!block.bookId
   const hasContent = !!(block.content.trim() || linked || nestedCount)
   const title = displayLibraryTitle(block.content)
   const summary =
@@ -126,7 +127,7 @@ export async function inspectBlockDeletion(id: string): Promise<DeleteImpact | n
     title,
     nestedCount,
     hasNotes: false,
-    hasPdf: false,
+    hasPdf,
     hasCaptures: false,
     hasContent,
     needsConfirm: nestedCount > 0 || linked,
@@ -134,9 +135,11 @@ export async function inspectBlockDeletion(id: string): Promise<DeleteImpact | n
     detail:
       nestedCount > 0
         ? 'Nested library rows on this page will be removed.'
-        : linked
-          ? 'This row is linked to a study item or page.'
-          : '',
+        : hasPdf
+          ? 'This removes the attachment from the page. The stored PDF is kept.'
+          : linked
+            ? 'This row is linked to a study item or page.'
+            : '',
   }
 }
 

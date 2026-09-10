@@ -45,6 +45,7 @@ describe('library page model', () => {
       'quote',
       'divider',
       'study',
+      'book',
       'page',
     ])
   })
@@ -53,6 +54,9 @@ describe('library page model', () => {
     expect(filterLibraryBlocks('heading 1')[0]?.id).toBe('heading1')
     expect(filterLibraryBlocks('toggle')[0]?.id).toBe('toggle')
     expect(filterLibraryBlocks('quote').map((e) => e.id)).toContain('quote')
+    expect(filterLibraryBlocks('book')[0]?.id).toBe('book')
+    expect(filterLibraryBlocks('pdf')[0]?.id).toBe('book')
+    expect(filterLibraryBlocks('file')[0]?.id).toBe('book')
   })
 
   it('does not persist empty or in-progress slash text', () => {
@@ -63,6 +67,8 @@ describe('library page model', () => {
     expect(isPersistableBlock(block({ id: 'a', type: 'toggle', content: '' }))).toBe(false)
     expect(isPersistableBlock(block({ id: 'a', type: 'toggle', content: 'Aqidah' }))).toBe(true)
     expect(isPersistableBlock(block({ id: 'a', type: 'divider', content: '' }))).toBe(true)
+    expect(isPersistableBlock(block({ id: 'a', type: 'book', content: '' }))).toBe(false)
+    expect(isPersistableBlock(block({ id: 'a', type: 'book', content: '', bookId: 'bk_1' }))).toBe(true)
   })
 
   it('strips the slash query when converting', () => {

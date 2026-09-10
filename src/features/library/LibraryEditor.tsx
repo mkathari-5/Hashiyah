@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { libraryBlocksRepo, libraryPagesRepo } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { LibraryBlockRow } from '@/features/library/LibraryBlockRow'
+import { BookAttachPicker, type BookAttachChoice } from '@/features/library/BookAttachPicker'
 import {
   deleteLibraryBlock,
   inspectBlockDeletion,
@@ -18,6 +19,7 @@ import {
   indentPlacement,
   isContinueType,
   isPersistableBlock,
+  isStructuralLibraryType,
   isTransientId,
   makeTransientBlock,
   mergeVisible,
@@ -35,11 +37,18 @@ import {
 } from '@/features/library/libraryPageModel'
 import { ensureLibraryPageReady } from '@/features/library/migrateLibraryPages'
 import { SlashCommandMenu } from '@/features/library/SlashCommandMenu'
+import {
+  attachPdfToHost,
+  attachUploadedPdf,
+  blockOpensStudyWorkspace,
+  detachPdfFromBlock,
+  replacePdfForBlock,
+} from '@/services/library/bookAttachment'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { ConfirmDialog } from '@/features/shell/ConfirmDialog'
 import { ContextMenu } from '@/features/shell/ContextMenu'
 import { Icon } from '@/features/shell/Icon'
 import { concatRichDocs, plainFromRich, richFromPlain, splitRichDoc, type RichInlineDoc } from '@/lib/richTitle'
-import { useLibraryStore } from '@/state/useLibraryStore'
 import type { LibraryBlock } from '@/types'
 
 /**
@@ -68,7 +77,6 @@ export function LibraryEditor({
   const stored = useLiveQuery(() => libraryBlocksRepo.forPage(pageId), [pageId])
   const page = useLiveQuery(() => libraryPagesRepo.get(pageId), [pageId])
   const studyNodes = useLiveQuery(() => libraryRepo.all(), [])
-  const openStudySession = useLibraryStore((s) => s.openStudySession)
 
   const [ready, setReady] = useState(false)
   const [title, setTitle] = useState('Library')
@@ -78,6 +86,11 @@ export function LibraryEditor({
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [slash, setSlash] = useState<SlashState | null>(null)
   const [studyPickFor, setStudyPickFor] = useState<string | null>(null)
+  const [bookPick, setBookPick] = useState<{
+    hostBlockId: string | null
+    replaceBlockId: string | null
+    createHostToggle: boolean
+  } | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropId, setDropId] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -236,6 +249,9 @@ export function LibraryEditor({
       checked: block.checked,
       libraryNodeId: block.libraryNodeId,
       targetPageId: block.targetPageId,
+      bookId: block.bookId,
+      documentId: block.documentId,
+      noteBlockId: block.noteBlockId,
     })
     dropTransient(block.id)
     return created
@@ -286,6 +302,9 @@ export function LibraryEditor({
       }
 
       await libraryBlocksRepo.update(id, { content, richContent: rich })
+      if (current.libraryNodeId) {
+        await libraryRepo.update(current.libraryNodeId, { title: content.trim() || current.content, richTitle: rich })
+      }
     })
   }
 
@@ -332,6 +351,30 @@ export function LibraryEditor({
     setSlash(null)
     const current = blockById(live(), blockId) ?? transientsRef.current[blockId]
     if (!current) return
+
+    if (def.id === 'book') {
+      const structural = isStructuralLibraryType(current.type) && current.type !== 'book' && current.type !== 'page'
+      if (structural) {
+        const content = stripSlashQuery(drafts[current.id] ?? current.content)
+        const host = await ensurePersisted({ ...current, content })
+        if (!isTransientId(host.id) && content !== current.content) {
+          await libraryBlocksRepo.update(host.id, { content })
+        }
+        setBookPick({
+          hostBlockId: host.id,
+          replaceBlockId: null,
+          createHostToggle: false,
+        })
+        return
+      }
+      const leftover = stripSlashQuery(drafts[current.id] ?? current.content).trim()
+      setBookPick({
+        hostBlockId: current.parentBlockId,
+        replaceBlockId: leftover ? null : current.id,
+        createHostToggle: !current.parentBlockId,
+      })
+      return
+    }
 
     const emptyDraft = isTransientId(current.id) && !current.content.trim()
     if (mode === 'insert' && !emptyDraft) {
@@ -703,6 +746,75 @@ export function LibraryEditor({
     })
   }
 
+  const completeBookAttach = (choice: BookAttachChoice) => {
+    const pick = bookPick
+    setBookPick(null)
+    if (!pick) return
+    void run(async () => {
+      let hostId = pick.hostBlockId
+      if (hostId && isTransientId(hostId)) {
+        const host = transientsRef.current[hostId] ?? blockById(live(), hostId)
+        if (!host) return
+        const created = await persistTransient({
+          ...host,
+          content: host.content.trim() || 'Untitled',
+        })
+        hostId = created.id
+      }
+      if (choice.kind === 'upload') {
+        await attachUploadedPdf({
+          file: choice.file,
+          hostBlockId: hostId,
+          pageId,
+          replaceBlockId: pick.replaceBlockId,
+          createHostToggle: pick.createHostToggle,
+        })
+      } else {
+        await attachPdfToHost({
+          bookId: choice.bookId,
+          documentId: choice.documentId,
+          hostBlockId: hostId,
+          pageId,
+          replaceBlockId: pick.replaceBlockId,
+          createHostToggle: pick.createHostToggle,
+        })
+      }
+      if (pick.replaceBlockId && isTransientId(pick.replaceBlockId)) dropTransient(pick.replaceBlockId)
+    })
+  }
+
+  const openFromBlock = (id: string) => {
+    const block = blockById(blocks, id)
+    void openStudyWorkspace({
+      libraryBlockId: id,
+      noteBlockId: block?.noteBlockId,
+      forceThreePane: true,
+    })
+  }
+
+  const requestDeleteBlock = (id: string) => {
+    void inspectBlockDeletion(id).then((impact) => {
+      if (!impact) return
+      if (!impact.needsConfirm) {
+        void run(async () => {
+          const snapshot = await deleteLibraryBlock(id)
+          if (!snapshot) return
+          setFocusId(snapshot.selectAfter)
+          setUndo({
+            label: `Deleted “${impact.title}”`,
+            restore: async () => {
+              await restoreBlockDeletion(snapshot)
+              setFocusId(id)
+              setUndo(null)
+            },
+          })
+        })
+        return
+      }
+      setConfirm(impact)
+    })
+  }
+
   const renderBranch = (parentId: string | null, depth: number): React.ReactNode => {
     const kids = childrenOf(blocks, parentId)
     if (kids.length === 0) return null
@@ -721,20 +833,33 @@ export function LibraryEditor({
               focused={focusId === block.id}
               focusCaret={focusId === block.id ? focusCaret : 'end'}
               gutterOn={hoveredId === block.id || (focusId === block.id && hoveredId === null)}
+              opensWorkspace={blockOpensStudyWorkspace(block, blocks)}
               onHover={setHoveredId}
               onFocus={focus}
               onChange={onChange}
               onKeyDown={onKeyDown}
               onBlurEmpty={onBlurEmpty}
               onToggle={onToggle}
-              onOpenStudy={(nodeId) => void openStudySession(nodeId)}
+              onOpenStudy={(nodeId) => void openStudyWorkspace({ libraryItemId: nodeId, forceThreePane: true })}
               onOpenPage={(id) => onOpenPage?.(id)}
+              onOpenWorkspace={openFromBlock}
               onTodo={(id, checked) => void libraryBlocksRepo.update(id, { checked })}
               onInsert={onInsert}
               onContextMenu={(id, event) => {
                 if (isTransientId(id)) return
                 setMenu({ id, x: event.clientX, y: event.clientY })
               }}
+              onAttachBook={(id) =>
+                setBookPick({
+                  hostBlockId: block.parentBlockId,
+                  replaceBlockId: id,
+                  createHostToggle: !block.parentBlockId,
+                })
+              }
+              onRenameBook={(id, title) => void libraryBlocksRepo.update(id, { content: title })}
+              onReplaceBook={(id, file) => void run(() => replacePdfForBlock(id, file).then(() => undefined))}
+              onDetachBook={(id) => void run(() => detachPdfFromBlock(id))}
+              onDeleteBook={requestDeleteBlock}
               onDragStart={setDragId}
               onDragOver={(id, event) => {
                 if (!dragId || dragId === id) return
@@ -751,7 +876,7 @@ export function LibraryEditor({
             />
             {block.type === 'toggle' && !block.expanded
               ? null
-              : block.type === 'page'
+              : block.type === 'page' || block.type === 'book'
                 ? null
                 : renderBranch(block.id, depth + 1)}
           </li>
@@ -814,6 +939,13 @@ export function LibraryEditor({
         />
       )}
 
+      {bookPick && (
+        <BookAttachPicker
+          onChoose={completeBookAttach}
+          onClose={() => setBookPick(null)}
+        />
+      )}
+
       {studyPickFor && (
         <StudyPicker
           nodes={studyNodes ?? []}
@@ -835,33 +967,25 @@ export function LibraryEditor({
           label="Library row"
           onClose={() => setMenu(null)}
           items={[
+            ...(blockOpensStudyWorkspace(blockById(blocks, menu.id) ?? ({ type: 'text' } as LibraryBlock), blocks)
+              ? [
+                  {
+                    id: 'open',
+                    label: 'Open in study workspace',
+                    onSelect: () => openFromBlock(menu.id),
+                  },
+                  {
+                    id: 'rename',
+                    label: 'Rename',
+                    onSelect: () => focus(menu.id),
+                  },
+                ]
+              : []),
             {
               id: 'delete',
               label: 'Delete',
               danger: true,
-              onSelect: () => {
-                const id = menu.id
-                void inspectBlockDeletion(id).then((impact) => {
-                  if (!impact) return
-                  if (!impact.needsConfirm) {
-                    void run(async () => {
-                      const snapshot = await deleteLibraryBlock(id)
-                      if (!snapshot) return
-                      setFocusId(snapshot.selectAfter)
-                      setUndo({
-                        label: `Deleted “${impact.title}”`,
-                        restore: async () => {
-                          await restoreBlockDeletion(snapshot)
-                          setFocusId(id)
-                          setUndo(null)
-                        },
-                      })
-                    })
-                    return
-                  }
-                  setConfirm(impact)
-                })
-              },
+              onSelect: () => requestDeleteBlock(menu.id),
             },
           ]}
         />

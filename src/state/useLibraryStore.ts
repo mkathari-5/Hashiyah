@@ -1,8 +1,13 @@
 import { create } from 'zustand'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { appStateRepo } from '@/db/repos/session'
-import { ensureNodeNote, resolveBookId } from '@/services/library/bootstrap'
-import { useStudyStore } from '@/state/useStudyStore'
+import { loadStudySession } from '@/services/library/studySession'
+import {
+  pushLibraryHistory,
+  pushStudyHistory,
+  readWorkspaceHash,
+  replaceStudyHistory,
+} from '@/services/library/workspaceHistory'
 
 /**
  * Which part of the library is open (§E10, §E28, §E31).
@@ -11,7 +16,8 @@ import { useStudyStore } from '@/state/useStudyStore'
  * which PDF is on screen, which notes are in the right-hand panel — follows
  * from it. Opening a chapter must always reopen *the same* notes document, so
  * that relationship is resolved through `ensureNodeNote` rather than by
- * creating something new each time.
+ * creating something new each time. Homepage Book/PDF blocks, search, and the
+ * command palette share `openStudyWorkspace`, which writes this store.
  */
 
 interface LibraryState {
@@ -25,31 +31,23 @@ interface LibraryState {
   highlightNode: (nodeId: string) => Promise<void>
   /** Always enter Study — used by Study-page blocks, including sciences. */
   openStudySession: (nodeId: string) => Promise<void>
-  showLibrary: () => void
+  showLibrary: (history?: 'push' | 'none') => void
   toggleExpanded: (nodeId: string, collapsed: boolean) => Promise<void>
 }
 
-/**
- * Puts the study session behind a node in place: the right PDF, the node's own
- * notes document, and its page if it has one.
- *
- * Shared by opening a node and by restoring one at start-up, so a restored
- * session is identical to one you just clicked into.
- */
-async function reopen(nodeId: string): Promise<void> {
+async function enterSession(nodeId: string, history: 'push' | 'replace' | 'none' = 'push'): Promise<void> {
   const node = await libraryRepo.get(nodeId)
   if (!node) return
-
-  const bookId = await resolveBookId(node)
-  if (bookId) await useStudyStore.getState().openBook(bookId)
-
-  // §E10/§E45 — one stable notes document per node, reused forever.
-  const noteId = await ensureNodeNote(nodeId)
-  if (noteId) useStudyStore.getState().setActiveNote(noteId)
-
-  // §E13 — go to the chapter's page range if it has one; otherwise leave the
-  // reader where it was rather than jumping somewhere arbitrary.
-  if (node.pageStart) useStudyStore.getState().setPage(node.pageStart)
+  useLibraryStore.setState({ activeNodeId: nodeId })
+  void appStateRepo.set('activeLibraryNode', nodeId)
+  if (history === 'replace') replaceStudyHistory(nodeId)
+  else if (history !== 'none') pushStudyHistory(nodeId)
+  try {
+    await loadStudySession(node)
+    await libraryRepo.touch(nodeId)
+  } catch {
+    // Missing PDF bytes must not keep the user on the homepage.
+  }
 }
 
 export const useLibraryStore = create<LibraryState>((set) => ({
@@ -57,9 +55,17 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   hydrated: false,
 
   async hydrate() {
-    const activeNodeId = await appStateRepo.get<string | null>('activeLibraryNode', null)
+    const storedId = await appStateRepo.get<string | null>('activeLibraryNode', null)
+    const fromHash = readWorkspaceHash()
+    const activeNodeId =
+      fromHash?.view === 'study'
+        ? fromHash.nodeId
+        : fromHash?.view === 'library'
+          ? null
+          : storedId
     // Only restore if the node still exists — a deleted chapter must not leave
-    // the app pointing at nothing.
+    // the app pointing at nothing. Direct links wait until bootstrap has already
+    // run (see App.tsx) rather than guessing by title.
     const node = activeNodeId ? await libraryRepo.get(activeNodeId) : null
     if (!node) {
       set({ activeNodeId: null, hydrated: true })
@@ -72,7 +78,8 @@ export const useLibraryStore = create<LibraryState>((set) => ({
     // (§E31) — the point of Continue Studying is to land you back at work.
     set({ activeNodeId, hydrated: true })
     try {
-      await reopen(node.id)
+      await loadStudySession(node)
+      replaceStudyHistory(node.id)
     } catch {
       // A book whose file is missing should not block start-up; the reader
       // surfaces its own error and the library stays usable.
@@ -89,10 +96,7 @@ export const useLibraryStore = create<LibraryState>((set) => ({
       return
     }
 
-    await reopen(nodeId)
-    await libraryRepo.touch(nodeId)
-    set({ activeNodeId: nodeId })
-    void appStateRepo.set('activeLibraryNode', nodeId)
+    await enterSession(nodeId)
   },
 
   async highlightNode(nodeId) {
@@ -106,15 +110,13 @@ export const useLibraryStore = create<LibraryState>((set) => ({
   async openStudySession(nodeId) {
     const node = await libraryRepo.get(nodeId)
     if (!node) return
-    await reopen(nodeId)
-    await libraryRepo.touch(nodeId)
-    set({ activeNodeId: nodeId })
-    void appStateRepo.set('activeLibraryNode', nodeId)
+    await enterSession(nodeId)
   },
 
-  showLibrary() {
+  showLibrary(history = 'push') {
     set({ activeNodeId: null })
     void appStateRepo.set('activeLibraryNode', null)
+    if (history !== 'none') pushLibraryHistory()
   },
 
   async toggleExpanded(nodeId, collapsed) {

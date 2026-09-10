@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { search, type SearchHit, type SearchResults, type SearchScope } from '@/services/search/SearchEngine'
+import { openStudyWorkspace } from '@/services/library/openStudyWorkspace'
 import { useAppStore } from '@/state/useAppStore'
-import { useLibraryStore } from '@/state/useLibraryStore'
-import { useNotesStore } from '@/state/useNotesStore'
 import { useStudyStore } from '@/state/useStudyStore'
 import { Icon } from '@/features/shell/Icon'
 
@@ -23,12 +22,6 @@ export function SearchPanel() {
   const setOpen = useAppStore((s) => s.setSearchOpen)
   const bookId = useStudyStore((s) => s.bookId)
   const documentId = useStudyStore((s) => s.documentId)
-  const openBook = useStudyStore((s) => s.openBook)
-  const setPage = useStudyStore((s) => s.setPage)
-  const requestJump = useStudyStore((s) => s.requestJump)
-  const setActiveNote = useStudyStore((s) => s.setActiveNote)
-  const openNode = useLibraryStore((s) => s.openNode)
-  const requestScrollTo = useNotesStore((s) => s.requestScrollTo)
 
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState<SearchScope>('book')
@@ -89,20 +82,27 @@ export function SearchPanel() {
     // A library or outline result names the node, so opening it restores the
     // whole context — book, chapter notes, sidebar selection — in one step.
     if (hit.nodeId) {
-      await openNode(hit.nodeId)
-      if (hit.blockId && hit.noteId) {
-        // The editor may still be loading; the request carries its note id and
-        // is consumed once that document is in place.
-        requestScrollTo(hit.noteId, hit.blockId)
-      }
+      await openStudyWorkspace({
+        libraryItemId: hit.nodeId,
+        noteId: hit.noteId,
+        noteBlockId: hit.blockId,
+        page: hit.pageNumber,
+        sourceAnchor: hit.annotationId,
+        forceThreePane: true,
+      })
       setOpen(false)
       return
     }
 
-    if (hit.bookId && hit.bookId !== bookId) await openBook(hit.bookId)
-    if (hit.kind === 'page' && hit.pageNumber) setPage(hit.pageNumber)
-    if (hit.kind === 'annotation' && hit.annotationId) requestJump(hit.annotationId)
-    if (hit.kind === 'note' && hit.noteId) setActiveNote(hit.noteId)
+    if (hit.bookId) {
+      await openStudyWorkspace({
+        bookId: hit.bookId,
+        page: hit.pageNumber,
+        sourceAnchor: hit.kind === 'annotation' ? hit.annotationId : null,
+        noteId: hit.noteId,
+        forceThreePane: true,
+      })
+    }
     setOpen(false)
   }
 

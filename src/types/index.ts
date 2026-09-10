@@ -123,6 +123,7 @@ export type LibraryBlockType =
   | 'divider'
   | 'study'
   | 'page'
+  | 'book'
 
 export interface LibraryPage {
   id: string
@@ -153,6 +154,15 @@ export interface LibraryBlock {
   libraryNodeId?: string | null
   /** When set, this block opens another Library page. */
   targetPageId?: string | null
+  /**
+   * Stable Book id for a Book/PDF attachment. Never a filename or the PDF
+   * bytes — those live on `documents` / `documentBlobs`.
+   */
+  bookId?: string | null
+  /** Stable DocumentMeta id of the attached PDF, when this block is a Book/PDF. */
+  documentId?: string | null
+  /** Optional exact notes-block target when opening this row. */
+  noteBlockId?: string | null
   createdAt: number
   updatedAt: number
 }
