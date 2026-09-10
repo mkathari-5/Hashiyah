@@ -261,6 +261,7 @@ describe('schema v1 → current', () => {
     expect(await db.libraryBlocks.count()).toBe(0)
     expect(await db.pageMarks.count()).toBe(0)
     expect(await db.ocrResults.count()).toBe(0)
+    expect(await db.pdfNoteLinks.count()).toBe(0)
 
     db.close()
   })

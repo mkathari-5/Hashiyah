@@ -42,6 +42,8 @@ export interface ScrollRequest {
   noteId: string
   blockId: string
   nonce: number
+  /** Place the caret inside the block (used after creating a section from the PDF). */
+  placeCaret?: boolean
 }
 
 export interface FindRequest {
@@ -69,7 +71,7 @@ interface NotesState {
   clearInsert: () => void
 
   pendingScroll: ScrollRequest | null
-  requestScrollTo: (noteId: string, blockId: string) => void
+  requestScrollTo: (noteId: string, blockId: string, options?: { placeCaret?: boolean }) => void
   clearScroll: () => void
 
   pendingFind: FindRequest | null
@@ -112,7 +114,8 @@ export const useNotesStore = create<NotesState>((set) => ({
   clearInsert: () => set({ pendingInsert: null }),
 
   pendingScroll: null,
-  requestScrollTo: (noteId, blockId) => set({ pendingScroll: { noteId, blockId, nonce: ++nonce } }),
+  requestScrollTo: (noteId, blockId, options) =>
+    set({ pendingScroll: { noteId, blockId, nonce: ++nonce, placeCaret: options?.placeCaret } }),
   clearScroll: () => set({ pendingScroll: null }),
 
   pendingFind: null,

@@ -19,6 +19,7 @@ export const ids = {
   libraryBlock: () => newId('lblk'),
   pageMark: () => newId('pmk'),
   ocrResult: () => newId('ocr'),
+  pdfNoteLink: () => newId('pnl'),
 }
 
 export const pageId = (documentId: string, pageNumber: number) => `${documentId}:${pageNumber}`

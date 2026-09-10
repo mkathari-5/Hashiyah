@@ -6,7 +6,9 @@ import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/exte
 import {
   deleteEmptyToggle,
   exitToggleBody,
+  findBlockPos,
   findToggle,
+  insertNamedToggle,
   insertSiblingToggle,
   insertToggleAtCaret,
   isEmptyToggle,
@@ -15,6 +17,8 @@ import {
   outdentToggle,
   wrapBlockInToggle,
 } from '@/features/notes/extensions/toggleOutline'
+import { expandAncestorsForBlock } from '@/features/notes/revealEditorBlock'
+import { noteExtensions } from '@/features/notes/NoteEditor'
 
 /** Plain document rendering — no React node view noise in unit tests. */
 const TogglePlain = ToggleBlock.extend({
@@ -295,6 +299,79 @@ describe('Toggle Notion-like keyboard flow', () => {
     expect(tr).toBeTruthy()
     editor.view.dispatch(tr!)
     expect(editor.state.doc.child(0).attrs.open).toBe(true)
+    editor.destroy()
+  })
+
+  it('insertNamedToggle assigns a stable block id and can nest under a parent', () => {
+    const editor = new Editor({
+      extensions: noteExtensions,
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'toggleBlock',
+            attrs: { open: true, level: 0, blockId: 'blk_parent' },
+            content: [
+              { type: 'toggleSummary', content: [{ type: 'text', text: 'Chapter 7' }] },
+              { type: 'toggleContent', content: [{ type: 'paragraph' }] },
+            ],
+          },
+        ],
+      },
+    })
+    insertNamedToggle(
+      editor.state,
+      { title: 'Explanation of Chapter Title', parentBlockId: 'blk_parent', blockId: 'blk_expl' },
+      (tr) => editor.view.dispatch(tr),
+    )
+    expect(findBlockPos(editor.state, 'blk_expl')).not.toBeNull()
+    expect(editor.getJSON()).toEqual(
+      expect.objectContaining({
+        type: 'doc',
+      }),
+    )
+    expect(JSON.stringify(editor.getJSON())).toContain('blk_expl')
+    expect(JSON.stringify(editor.getJSON())).toContain('Explanation of Chapter Title')
+    editor.destroy()
+  })
+
+  it('expandAncestorsForBlock opens nested collapsed toggles by id', () => {
+    const editor = new Editor({
+      extensions: noteExtensions,
+      content: {
+        type: 'doc',
+        content: [
+          {
+            type: 'toggleBlock',
+            attrs: { open: false, level: 0, blockId: 'blk_outer' },
+            content: [
+              { type: 'toggleSummary', content: [{ type: 'text', text: 'Chapter 7' }] },
+              {
+                type: 'toggleContent',
+                content: [
+                  {
+                    type: 'toggleBlock',
+                    attrs: { open: false, level: 1, blockId: 'blk_expl' },
+                    content: [
+                      { type: 'toggleSummary', content: [{ type: 'text', text: 'Explanation of Chapter Title' }] },
+                      { type: 'toggleContent', content: [{ type: 'paragraph', attrs: { blockId: 'blk_body' } }] },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    })
+    expect(expandAncestorsForBlock(editor, 'blk_expl')).toBe(true)
+    const outer = editor.state.doc.child(0)
+    expect(outer.attrs.open).toBe(true)
+    let innerOpen = false
+    editor.state.doc.descendants((node) => {
+      if (node.attrs.blockId === 'blk_expl') innerOpen = node.attrs.open === true
+    })
+    expect(innerOpen).toBe(true)
     editor.destroy()
   })
 })

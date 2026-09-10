@@ -297,3 +297,52 @@ export function openAncestorToggles(state: EditorState, pos: number): Transactio
   }
   return changed ? tr : null
 }
+
+/**
+ * Insert a titled toggle with a caller-assigned stable `blockId`.
+ *
+ * Used when a PDF link creates a new note section: the id must exist before
+ * the join row is written, and must not be regenerated on the next editor load.
+ */
+export function insertNamedToggle(
+  state: EditorState,
+  options: { title: string; parentBlockId?: string | null; blockId: string },
+  dispatch?: (tr: Transaction) => void,
+): boolean {
+  const { schema } = state
+  if (!schema.nodes.toggleBlock || !schema.nodes.toggleSummary || !schema.nodes.toggleContent) return false
+
+  let insertPos = state.doc.content.size
+  let level = 0
+  if (options.parentBlockId) {
+    const parentPos = findBlockPos(state, options.parentBlockId)
+    if (parentPos !== null) {
+      const parent = state.doc.nodeAt(parentPos)
+      if (parent?.type.name === 'toggleBlock') {
+        insertPos = parentPos + parent.nodeSize - 2
+        level = Number(parent.attrs.level ?? 0) + 1
+      }
+    }
+  }
+
+  const summary = options.title
+    ? schema.nodes.toggleSummary.create(null, schema.text(options.title))
+    : schema.nodes.toggleSummary.create()
+  const node = schema.nodes.toggleBlock.create({ open: true, level, blockId: options.blockId }, [
+    summary,
+    schema.nodes.toggleContent.create(null, schema.nodes.paragraph.create()),
+  ])
+
+  let tr = state.tr.insert(insertPos, node)
+  const $inside = tr.doc.resolve(Math.min(insertPos + 2, tr.doc.content.size))
+  for (let depth = $inside.depth; depth > 0; depth--) {
+    const ancestor = $inside.node(depth)
+    if (ancestor.type.name === 'toggleBlock' && ancestor.attrs.open === false) {
+      tr = tr.setNodeAttribute($inside.before(depth), 'open', true)
+    }
+  }
+  const bodyPos = insertPos + 1 + node.child(0).nodeSize + 1
+  tr = tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(bodyPos, tr.doc.content.size)), 1)).scrollIntoView()
+  if (dispatch) dispatch(tr)
+  return true
+}

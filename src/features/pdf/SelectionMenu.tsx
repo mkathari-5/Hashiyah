@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { KIND_META } from '@/services/annotations/kinds'
 import { copySelection, extractAndExplain, sendToNotes } from '@/services/notes/extract'
+import { Icon } from '@/features/shell/Icon'
 import { useStudyStore } from '@/state/useStudyStore'
 import type { AnnotationKind } from '@/types'
 
@@ -21,11 +22,13 @@ type Action =
   | { id: 'copy'; label: string; hint?: string }
   | { id: 'send'; label: string; hint?: string }
   | { id: 'snip'; label: string; hint?: string }
+  | { id: 'link'; label: string; hint?: string }
   | { id: AnnotationKind; label: string; hint?: string }
 
 const PRIMARY_ACTIONS: Action[] = [
   { id: 'explain', label: 'Explain', hint: 'Ctrl E' },
   { id: 'send', label: 'Send to notes' },
+  { id: 'link', label: 'Link to note' },
   { id: 'copy', label: 'Copy', hint: 'Ctrl C' },
   { id: 'highlight', label: 'Highlight', hint: 'Ctrl H' },
   { id: 'underline', label: 'Underline' },
@@ -43,6 +46,7 @@ const OVERFLOW_ACTIONS: Action[] = [
 
 export function SelectionMenu() {
   const selection = useStudyStore((s) => s.selection)
+  const linkDraft = useStudyStore((s) => s.linkDraft)
   const setSnipMode = useStudyStore((s) => s.setSnipMode)
   const menuRef = useRef<HTMLDivElement>(null)
   const [more, setMore] = useState(false)
@@ -72,7 +76,7 @@ export function SelectionMenu() {
     setPos({ left, top: Math.max(MARGIN, top) })
   }, [selection, more])
 
-  if (!selection) return null
+  if (!selection || linkDraft) return null
 
   const perform = (action: Action) => {
     if (action.id === 'copy') {
@@ -84,6 +88,13 @@ export function SelectionMenu() {
     }
     if (action.id === 'send') {
       void sendToNotes(selection)
+      return
+    }
+    if (action.id === 'link') {
+      useStudyStore.getState().setLinkDraft({
+        ...selection,
+        anchorKind: selection.anchorKind ?? 'text-selection',
+      })
       return
     }
     if (action.id === 'snip') {
@@ -110,6 +121,7 @@ export function SelectionMenu() {
           title={action.hint ? `${action.label} · ${action.hint}` : action.label}
           className="hover:bg-hover text-ink flex h-7 shrink-0 items-center gap-1.5 rounded px-2 text-xs whitespace-nowrap"
         >
+          {action.id === 'link' && <Icon name="link" />}
           {action.id in KIND_META && (
             <span
               className="h-2 w-2 shrink-0 rounded-[2px]"

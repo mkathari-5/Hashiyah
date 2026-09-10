@@ -31,9 +31,19 @@ export const notesRepo = {
   update: (id: string, patch: Partial<Note>) => db.notes.update(id, { ...patch, updatedAt: Date.now() }),
 
   async remove(id: string) {
-    await db.transaction('rw', db.notes, db.noteDocs, db.quoteRefs, async () => {
+    await db.transaction(
+      'rw',
+      [db.notes, db.noteDocs, db.quoteRefs, db.noteLinks, db.pdfNoteLinks, db.annotations, db.anchors],
+      async () => {
+      const links = await db.pdfNoteLinks.where('noteDocumentId').equals(id).toArray()
+      for (const link of links) {
+        await db.anchors.where('annotationId').equals(link.annotationId).delete()
+        await db.annotations.delete(link.annotationId)
+      }
+      await db.pdfNoteLinks.where('noteDocumentId').equals(id).delete()
       await db.noteDocs.delete(id)
       await db.quoteRefs.where('noteId').equals(id).delete()
+      await db.noteLinks.where('sourceNoteId').equals(id).delete()
       await db.notes.delete(id)
     })
   },

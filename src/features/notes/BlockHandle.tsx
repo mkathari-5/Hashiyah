@@ -2,6 +2,10 @@
 import type { Editor } from '@tiptap/core'
 import { NodeSelection } from '@tiptap/pm/state'
 import { BLOCK_CATALOGUE, filterBlocks, groupBlocks } from '@/features/notes/blockCatalogue'
+import { ConfirmDialog } from '@/features/shell/ConfirmDialog'
+import { PdfNoteLinkEngine } from '@/services/notes/PdfNoteLinkEngine'
+import { useStudyStore } from '@/state/useStudyStore'
+import type { Node as PMNode } from '@tiptap/pm/model'
 
 /**
  * The hover grip (§6).
@@ -187,6 +191,7 @@ function BlockMenu({
   const [view, setView] = useState<'root' | 'turn' | 'colour'>('root')
   const [query, setQuery] = useState('')
   const [copied, setCopied] = useState(false)
+  const [linkWarn, setLinkWarn] = useState<{ count: number; ids: string[] } | null>(null)
 
   useEffect(() => {
     const onDown = (e: PointerEvent) => {
@@ -254,6 +259,19 @@ function BlockMenu({
 
   const remove = () => {
     if (!node) return
+    const ids = collectPmBlockIds(node)
+    const noteId = useStudyStore.getState().activeNoteId
+    if (noteId && ids.length) {
+      void PdfNoteLinkEngine.countForBlocks(noteId, ids).then((count) => {
+        if (count > 0) {
+          setLinkWarn({ count, ids })
+          return
+        }
+        editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run()
+        onClose()
+      })
+      return
+    }
     editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run()
     onClose()
   }
@@ -386,8 +404,35 @@ function BlockMenu({
           ))}
         </>
       )}
+      {linkWarn && (
+        <ConfirmDialog
+          title="This section is linked to the PDF"
+          body={`${linkWarn.count} linked PDF label${linkWarn.count === 1 ? '' : 's'} will be removed. The PDF itself is kept.`}
+          confirmLabel="Delete section"
+          onCancel={() => setLinkWarn(null)}
+          onConfirm={() => {
+            const noteId = useStudyStore.getState().activeNoteId
+            const warn = linkWarn
+            setLinkWarn(null)
+            if (noteId) void PdfNoteLinkEngine.removeForBlocks(noteId, warn.ids)
+            if (node) editor.chain().focus().deleteRange({ from: pos, to: pos + node.nodeSize }).run()
+            onClose()
+          }}
+        />
+      )}
     </div>
   )
 }
 
 export { BLOCK_CATALOGUE }
+
+function collectPmBlockIds(node: PMNode): string[] {
+  const ids: string[] = []
+  const id = node.attrs.blockId
+  if (typeof id === 'string' && id) ids.push(id)
+  node.descendants((child) => {
+    const childId = child.attrs.blockId
+    if (typeof childId === 'string' && childId) ids.push(childId)
+  })
+  return ids
+}

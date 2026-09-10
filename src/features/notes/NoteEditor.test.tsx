@@ -199,7 +199,6 @@ describe('revision mode', () => {
       expect(revising('nt_3')).toBe(false)
     })
   })
-
   /**
    * Ctrl+3 and its friends rebuild the panel group, which rebuilds this
    * editor. That is a change of *view*, not of chapter: the reader is still
@@ -319,5 +318,32 @@ describe('revision mode', () => {
 
     // B goes back to closed: revealing an answer is not editing the chapter.
     await waitFor(async () => expect(await savedStates('nt_3')).toEqual({ a: true, b: false, c: true }))
+  })
+})
+
+describe('exact-block navigation from a PDF note link', () => {
+  it('reloads saved content when the live editor is missing the target block', async () => {
+    useStudyStore.setState({ activeNoteId: 'nt_3' })
+    render(<Study />)
+    await waitFor(() => expect(openState()).toEqual({ a: true, b: false, c: true }))
+
+    await db.noteDocs.put({
+      noteId: 'nt_3',
+      doc: {
+        type: 'doc',
+        content: [...CHAPTER_3.content, toggle('Explanation of Chapter Title', 'expl', true)],
+      },
+      updatedAt: Date.now(),
+    })
+
+    await act(async () => {
+      useNotesStore.getState().requestScrollTo('nt_3', 'expl')
+    })
+
+    await waitFor(() => {
+      const el = document.querySelector('[data-block-id="expl"]')
+      expect(el).toBeTruthy()
+      expect(el?.classList.contains('block-pulse')).toBe(true)
+    })
   })
 })

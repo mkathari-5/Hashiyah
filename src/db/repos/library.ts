@@ -80,10 +80,11 @@ export const booksRepo = {
   async remove(id: string) {
     await db.transaction(
       'rw',
-      [db.books, db.documents, db.documentBlobs, db.pages, db.outlineNodes, db.annotations, db.anchors, db.notes, db.noteDocs, db.quoteRefs, db.readingStates, db.bookmarks, db.layers, db.lessons],
+      [db.books, db.documents, db.documentBlobs, db.pages, db.outlineNodes, db.annotations, db.anchors, db.notes, db.noteDocs, db.quoteRefs, db.readingStates, db.bookmarks, db.layers, db.lessons, db.pdfNoteLinks],
       async () => {
         const docs = await db.documents.where('bookId').equals(id).toArray()
         for (const doc of docs) {
+          await db.pdfNoteLinks.where('pdfDocumentId').equals(doc.id).delete()
           await db.pages.where('documentId').equals(doc.id).delete()
           await db.documentBlobs.delete(doc.id)
         }
@@ -93,6 +94,7 @@ export const booksRepo = {
         for (const ann of anns) {
           await db.anchors.where('annotationId').equals(ann.id).delete()
           await db.quoteRefs.where('annotationId').equals(ann.id).delete()
+          await db.pdfNoteLinks.where('annotationId').equals(ann.id).delete()
         }
         await db.annotations.where('bookId').equals(id).delete()
 
@@ -100,6 +102,7 @@ export const booksRepo = {
         for (const note of notes) {
           await db.noteDocs.delete(note.id)
           await db.quoteRefs.where('noteId').equals(note.id).delete()
+          await db.pdfNoteLinks.where('noteDocumentId').equals(note.id).delete()
         }
         await db.notes.where('bookId').equals(id).delete()
 

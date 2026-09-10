@@ -23,8 +23,12 @@ import { SlashCommand } from '@/features/notes/extensions/SlashCommand'
 import { SourceGroup } from '@/features/notes/extensions/SourceGroup'
 import { SourceQuote } from '@/features/notes/extensions/SourceQuote'
 import { ToggleBlock, ToggleContent, ToggleSummary } from '@/features/notes/extensions/Toggle'
-import { findBlockPos, openAncestorToggles } from '@/features/notes/extensions/toggleOutline'
+import { findBlockPos, insertNamedToggle } from '@/features/notes/extensions/toggleOutline'
 import { WikiLink, handleWikiLinkClick } from '@/features/notes/extensions/WikiLink'
+import { NoteSourceChips } from '@/features/notes/NoteSourceChips'
+import { revealEditorBlock } from '@/features/notes/revealEditorBlock'
+import { registerLiveNoteEditor } from '@/services/notes/liveNoteEditor'
+import { blockExists } from '@/services/notes/noteTargets'
 import {
   applyToggleStates,
   collectOutline,
@@ -121,21 +125,6 @@ function applyStatesToDocument(editor: Editor, states: Record<string, boolean>) 
     }
   })
   if (changed) editor.view.dispatch(tr)
-}
-
-function revealEditorBlock(editor: Editor, scrollRoot: HTMLElement | null, blockId: string) {
-  const pos = findBlockPos(editor.state, blockId)
-  if (pos !== null) {
-    const tr = openAncestorToggles(editor.state, pos)
-    if (tr) editor.view.dispatch(tr)
-  }
-  requestAnimationFrame(() => {
-    const el = scrollRoot?.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)
-    if (!el) return
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    el.classList.add('block-pulse')
-    window.setTimeout(() => el.classList.remove('block-pulse'), 1200)
-  })
 }
 
 export interface NoteEditorHandle {
@@ -362,8 +351,31 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   // ── Scroll to a block, from the sidebar outline or a search result ────────
   useEffect(() => {
     if (!editor || !pendingScroll || loadedNoteId !== pendingScroll.noteId) return
-    revealEditorBlock(editor, scrollRef.current, pendingScroll.blockId)
-    clearScroll()
+    const req = pendingScroll
+    if (findBlockPos(editor.state, req.blockId) !== null) {
+      revealEditorBlock(editor, scrollRef.current, req.blockId, {
+        placeCaret: req.placeCaret,
+      })
+      clearScroll()
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      const row = await noteDocsRepo.get(req.noteId)
+      if (cancelled || editor.isDestroyed) return
+      if (row && blockExists(row.doc, req.blockId)) {
+        editor.commands.setContent(row.doc ?? emptyDoc(), { emitUpdate: false })
+        dirtyRef.current = false
+        revealEditorBlock(editor, scrollRef.current, req.blockId, {
+          placeCaret: req.placeCaret,
+        })
+      }
+      if (!cancelled) clearScroll()
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [editor, pendingScroll, loadedNoteId, clearScroll])
 
   // ── Revision mode (§E30) ──────────────────────────────────────────────────
@@ -405,6 +417,25 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
   useEffect(() => {
     endRevisionElsewhere(noteId)
   }, [noteId, endRevisionElsewhere])
+
+  useEffect(() => {
+    if (!editor || loadedNoteId !== noteId) return
+    return registerLiveNoteEditor({
+      noteId,
+      insertNamedToggle: (options) =>
+        insertNamedToggle(editor.state, options, (tr) => editor.view.dispatch(tr)),
+      getJSON: () => editor.getJSON(),
+      flush: async () => {
+        dirtyRef.current = true
+        await flush()
+      },
+      applyJSON: (doc) => {
+        if (editor.isDestroyed) return
+        editor.commands.setContent(doc ?? emptyDoc(), { emitUpdate: false })
+        dirtyRef.current = false
+      },
+    })
+  }, [editor, loadedNoteId, noteId, flush])
 
   // ── Find within note ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -480,6 +511,7 @@ export function NoteEditor({ noteId, ref, onStats }: Props) {
         <EditorContent editor={editor} />
         {/* The block grip is editing chrome, and revision is for reading. */}
         {!revisionMode && <BlockHandle editor={editor} scrollRef={scrollRef} />}
+        <NoteSourceChips editor={editor} scrollRef={scrollRef} noteId={noteId} />
       </div>
     </div>
   )

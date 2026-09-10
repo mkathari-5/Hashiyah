@@ -20,6 +20,7 @@ import type {
   OcrResult,
   PageMark,
   PageRecord,
+  PdfNoteLink,
   QuoteRef,
   ReadingState,
   Subject,
@@ -61,6 +62,7 @@ export class HashiyahDB extends Dexie {
   libraryBlocks!: Table<LibraryBlock, string>
   pageMarks!: Table<PageMark, string>
   ocrResults!: Table<OcrResult, string>
+  pdfNoteLinks!: Table<PdfNoteLink, string>
 
   constructor(name = 'hashiyah') {
     super(name)
@@ -142,6 +144,19 @@ export class HashiyahDB extends Dexie {
     this.version(5).stores({
       pageMarks: 'id, documentId, bookId, [documentId+pageNumber], createdAt',
       ocrResults: 'id, documentId, fingerprint, [documentId+pageNumber]',
+    })
+
+    /**
+     * v6 — additive only. Bidirectional PDF ↔ note links.
+     *
+     * Companion PDF geometry stays on the existing `annotations`/`anchors`
+     * tables (`kind: 'noteLink'`). This join table names the target by stable
+     * note + block id, so renaming a heading cannot break the relationship and
+     * existing quotes, snips and highlights are left untouched.
+     */
+    this.version(6).stores({
+      pdfNoteLinks:
+        'id, pdfDocumentId, noteDocumentId, noteBlockId, annotationId, [pdfDocumentId+pageNumber], [noteDocumentId+noteBlockId]',
     })
   }
 }

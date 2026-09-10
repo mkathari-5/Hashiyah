@@ -31,7 +31,7 @@ async function ensureActiveNote(bookId: string): Promise<string> {
 }
 
 function shapeFor(kind: AnnotationKind): { shape: InsertShape; blockKind: string | null } {
-  if (kind === 'highlight' || kind === 'underline') return { shape: 'quote', blockKind: null }
+  if (kind === 'highlight' || kind === 'underline' || kind === 'noteLink') return { shape: 'quote', blockKind: null }
   const block = KIND_META[kind].block
   return block ? { shape: 'semantic', blockKind: block } : { shape: 'explain', blockKind: null }
 }

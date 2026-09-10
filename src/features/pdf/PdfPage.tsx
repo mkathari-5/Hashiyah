@@ -368,8 +368,10 @@ export function PdfPage({
         if (!box) return
         const x = (event.clientX - box.left) / box.width
         const y = (event.clientY - box.top) / box.height
-        const hit = highlights.find((h) =>
-          h.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
+        const hit = highlights.find(
+          (h) =>
+            h.annotation.kind !== 'noteLink' &&
+            h.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
         )
         if (hit) void deleteAnnotationMark(hit.annotation.id)
         return
@@ -416,6 +418,8 @@ export function PdfPage({
             bookId,
             menuLeft: last ? last.left + last.width / 2 : event.clientX,
             menuTop: last ? last.top : event.clientY,
+            textSource: showOcr ? 'ocr' : 'embedded',
+            anchorKind: 'text-selection',
           })
           return
         }
@@ -424,8 +428,10 @@ export function PdfPage({
       if (!box) return
       const x = (event.clientX - box.left) / box.width
       const y = (event.clientY - box.top) / box.height
-      const hit = highlights.find((h) =>
-        h.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
+      const hit = highlights.find(
+        (h) =>
+          h.annotation.kind !== 'noteLink' &&
+          h.rects.some((r) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h),
       )
       setSelection(null)
       if (hit) {
@@ -489,6 +495,7 @@ export function PdfPage({
       <div className="highlight-layer">
         {highlights.map(({ annotation, rects, degraded }) =>
           (annotation.kind === 'underline' ? underlineRectsForSelection(rects) : rects).map((r, i) => {
+            if (annotation.kind === 'noteLink' && pulseId !== annotation.id) return null
             const paint = displayHighlightColor(annotation.kind, annotation.color)
             const isUnderline = annotation.kind === 'underline'
             const isHighlight = annotation.kind === 'highlight'
@@ -502,6 +509,7 @@ export function PdfPage({
                   isHighlight ? `hl-${paint}` : '',
                   activeAnnotationId === annotation.id ? 'hl-active' : '',
                   pulseId === annotation.id ? 'hl-pulse' : '',
+                  annotation.kind === 'noteLink' ? 'pdf-note-link-source' : '',
                   degraded ? 'opacity-60' : '',
                 ]
                   .filter(Boolean)

@@ -7,6 +7,7 @@ import {
 } from '@/services/annotations/history'
 import { PageMarkEngine, type CreateMarkInput } from '@/services/annotations/PageMarkEngine'
 import { extractAndExplain } from '@/services/notes/extract'
+import { PdfNoteLinkEngine } from '@/services/notes/PdfNoteLinkEngine'
 import { useStudyStore, type LiveSelection } from '@/state/useStudyStore'
 import type { PageMark } from '@/types'
 
@@ -44,6 +45,10 @@ export async function deleteAnnotationMark(id: string): Promise<boolean> {
 export async function deleteSelectedAnnotation(): Promise<void> {
   const study = useStudyStore.getState()
   if (study.editingMarkId) return
+  if (study.selectedPdfNoteLinkId) {
+    await PdfNoteLinkEngine.unlink(study.selectedPdfNoteLinkId)
+    return
+  }
   if (study.selectedMarkId) {
     await deleteMark(study.selectedMarkId)
     return

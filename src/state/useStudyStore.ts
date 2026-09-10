@@ -4,10 +4,10 @@ import { documentsRepo } from '@/db/repos/documents'
 import { notesRepo } from '@/db/repos/notes'
 import { readingStateRepo } from '@/db/repos/session'
 import type { CapturedSelection } from '@/services/annotations/selection'
-import type { HighlightColor, OcrLanguage } from '@/types'
+import type { HighlightColor, OcrLanguage, PdfNoteAnchorKind } from '@/types'
 
-/** 'capture' inserts the region; 'explain' also drops a paragraph beneath (§D10). */
-export type SnipMode = null | 'capture' | 'explain'
+/** 'capture' inserts the region; 'explain' also drops a paragraph beneath (§D10); 'link' draws a PDF↔note region. */
+export type SnipMode = null | 'capture' | 'explain' | 'link'
 
 export type PdfTool = 'select' | 'pan' | 'text' | 'highlight' | 'underline' | 'erase'
 
@@ -29,6 +29,10 @@ export interface LiveSelection {
   /** Viewport-space anchor for the floating menu. */
   menuLeft: number
   menuTop: number
+  textSource?: 'embedded' | 'ocr' | 'none'
+  anchorKind?: PdfNoteAnchorKind
+  /** When set, the picker updates this link instead of creating a new one. */
+  relinkId?: string
 }
 
 interface StudyState {
@@ -57,11 +61,14 @@ interface StudyState {
   annotationGesture: boolean
   lastHighlightColor: HighlightColor
   lastUnderlineColor: HighlightColor
+  selectedPdfNoteLinkId: string | null
+  linkDraft: LiveSelection | null
 
   openBook: (bookId: string) => Promise<void>
   closeBook: () => void
   setPage: (page: number) => void
   setPageCount: (count: number) => void
+  setDocumentId: (documentId: string | null) => void
   setZoom: (zoom: number) => void
   setFitMode: (mode: 'width' | 'page' | 'custom') => void
   setActiveNote: (noteId: string | null) => void
@@ -82,6 +89,8 @@ interface StudyState {
   setAnnotationGesture: (active: boolean) => void
   setLastHighlightColor: (color: HighlightColor) => void
   setLastUnderlineColor: (color: HighlightColor) => void
+  setSelectedPdfNoteLinkId: (id: string | null) => void
+  setLinkDraft: (draft: LiveSelection | null) => void
 }
 
 let nonce = 0
@@ -109,6 +118,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   annotationGesture: false,
   lastHighlightColor: 'yellow',
   lastUnderlineColor: 'ink',
+  selectedPdfNoteLinkId: null,
+  linkDraft: null,
 
   async openBook(bookId) {
     if (get().bookId === bookId) return
@@ -141,6 +152,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       pageRotation: 0,
       selectedMarkId: null,
       editingMarkId: null,
+      selectedPdfNoteLinkId: null,
+      linkDraft: null,
     })
     void booksRepo.touch(bookId)
   },
@@ -158,6 +171,8 @@ export const useStudyStore = create<StudyState>((set, get) => ({
       pdfTool: 'select',
       selectedMarkId: null,
       editingMarkId: null,
+      selectedPdfNoteLinkId: null,
+      linkDraft: null,
     }),
 
   setPage(page) {
@@ -166,12 +181,19 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   },
 
   setPageCount: (pageCount) => set({ pageCount }),
+  setDocumentId: (documentId) => set({ documentId }),
   setZoom: (zoom) => set({ zoom, fitMode: 'custom' }),
   setFitMode: (fitMode) => set({ fitMode }),
   setActiveNote(noteId) {
     set({ activeNoteId: noteId })
     const { bookId } = get()
-    if (bookId) void get().persistPosition(-1)
+    if (!bookId || !noteId) {
+      if (bookId) void get().persistPosition(-1)
+      return
+    }
+    void notesRepo.get(noteId).then((note) => {
+      if (note?.bookId === bookId) void get().persistPosition(-1)
+    })
   },
   setSelection: (selection) => set({ selection }),
   setActiveAnnotation: (activeAnnotationId) => set({ activeAnnotationId }),
@@ -217,4 +239,7 @@ export const useStudyStore = create<StudyState>((set, get) => ({
   setAnnotationGesture: (annotationGesture) => set({ annotationGesture }),
   setLastHighlightColor: (lastHighlightColor) => set({ lastHighlightColor }),
   setLastUnderlineColor: (lastUnderlineColor) => set({ lastUnderlineColor }),
+  setSelectedPdfNoteLinkId: (selectedPdfNoteLinkId) =>
+    set({ selectedPdfNoteLinkId, selectedMarkId: selectedPdfNoteLinkId ? null : get().selectedMarkId }),
+  setLinkDraft: (linkDraft) => set({ linkDraft }),
 }))

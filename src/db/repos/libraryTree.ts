@@ -154,12 +154,21 @@ export const libraryRepo = {
     const ids = doomed.map((n) => n.id)
     const noteIds = doomed.map((n) => n.noteId).filter((n): n is string => !!n)
 
-    await db.transaction('rw', db.libraryNodes, db.notes, db.noteDocs, db.quoteRefs, db.noteLinks, async () => {
+    await db.transaction(
+      'rw',
+      [db.libraryNodes, db.notes, db.noteDocs, db.quoteRefs, db.noteLinks, db.pdfNoteLinks, db.annotations, db.anchors],
+      async () => {
       await db.libraryNodes.bulkDelete(ids)
       if (options.deleteNotes && noteIds.length) {
         await db.noteDocs.bulkDelete(noteIds)
         await db.notes.bulkDelete(noteIds)
         for (const noteId of noteIds) {
+          const links = await db.pdfNoteLinks.where('noteDocumentId').equals(noteId).toArray()
+          for (const link of links) {
+            await db.anchors.where('annotationId').equals(link.annotationId).delete()
+            await db.annotations.delete(link.annotationId)
+          }
+          await db.pdfNoteLinks.where('noteDocumentId').equals(noteId).delete()
           await db.quoteRefs.where('noteId').equals(noteId).delete()
           await db.noteLinks.where('sourceNoteId').equals(noteId).delete()
         }

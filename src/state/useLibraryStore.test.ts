@@ -110,6 +110,21 @@ describe('opening a chapter', () => {
     expect((await db.notes.get(noteId))?.title).toBe('Chapter 3 — باب الخوف من الشرك')
     expect((await libraryRepo.get(three.id))?.title).toBe('Chapter 3')
   })
+
+  it('highlightNode changes the library selection without resetting the PDF page or note', async () => {
+    const { three, four } = await seedLibrary()
+    await useLibraryStore.getState().openNode(three.id)
+    const noteId = useStudyStore.getState().activeNoteId
+    useStudyStore.getState().setPage(36)
+    useStudyStore.getState().setZoom(1.5)
+
+    await useLibraryStore.getState().highlightNode(four.id)
+
+    expect(useLibraryStore.getState().activeNodeId).toBe(four.id)
+    expect(useStudyStore.getState().currentPage).toBe(36)
+    expect(useStudyStore.getState().zoom).toBe(1.5)
+    expect(useStudyStore.getState().activeNoteId).toBe(noteId)
+  })
 })
 
 describe('Continue Studying', () => {

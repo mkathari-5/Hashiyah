@@ -34,9 +34,10 @@ export const annotationsRepo = {
     db.annotations.update(id, { ...patch, updatedAt: Date.now() }),
 
   async remove(id: string) {
-    await db.transaction('rw', db.annotations, db.anchors, db.quoteRefs, async () => {
+    await db.transaction('rw', db.annotations, db.anchors, db.quoteRefs, db.pdfNoteLinks, async () => {
       await db.anchors.where('annotationId').equals(id).delete()
       await db.quoteRefs.where('annotationId').equals(id).delete()
+      await db.pdfNoteLinks.where('annotationId').equals(id).delete()
       await db.annotations.delete(id)
     })
   },

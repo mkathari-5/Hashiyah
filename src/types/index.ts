@@ -272,6 +272,11 @@ export const ANNOTATION_KINDS = [
   'capture',
   /** Text-layer underline; geometry lives on the existing anchor. */
   'underline',
+  /**
+   * Geometry for a PDF ↔ note link. Painted as a linked label, not as a
+   * highlight. The note target lives on `pdfNoteLinks`, keyed by block id.
+   */
+  'noteLink',
 ] as const
 
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number]
@@ -469,6 +474,40 @@ export interface NoteLink {
   /** Resolved id, or null while the target does not exist yet. */
   targetId: string | null
   label: string
+}
+
+/**
+ * A persistent relationship between an exact PDF location and an exact note
+ * block. The PDF geometry lives on the companion `Annotation` + `AnnotationAnchor`;
+ * this row is the join. Titles are never the identifier — `noteBlockId` is.
+ */
+export const PDF_NOTE_LINK_VERSION = 1
+
+export type PdfNoteAnchorKind = 'text-selection' | 'region' | 'point'
+
+export type PdfNoteLabelMode = 'sync-with-note-title' | 'custom'
+
+export interface PdfNoteLink {
+  id: string
+  version: typeof PDF_NOTE_LINK_VERSION
+  /** Companion annotation holding page geometry and selected-text context. */
+  annotationId: string
+  pdfDocumentId: string
+  pageNumber: number
+  noteDocumentId: string
+  libraryItemId: string | null
+  /** Stable Tiptap `blockId`. Survives rename, move, and reload. */
+  noteBlockId: string
+  anchorKind: PdfNoteAnchorKind
+  labelMode: PdfNoteLabelMode
+  customLabel: string | null
+  /** Label origin in unrotated normalised page space. May sit in the gutter. */
+  labelX: number
+  labelY: number
+  colour: string | null
+  connectorVisible: boolean
+  createdAt: number
+  updatedAt: number
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

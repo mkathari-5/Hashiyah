@@ -1,8 +1,9 @@
 import { anchorsRepo, annotationsRepo } from '@/db/repos/annotations'
 import { pageMarksRepo } from '@/db/repos/pageMarks'
+import { pdfNoteLinksRepo } from '@/db/repos/pdfNoteLinks'
 import { AnnotationEngine } from '@/services/annotations/AnnotationEngine'
 import { PageMarkEngine } from '@/services/annotations/PageMarkEngine'
-import type { Annotation, AnnotationAnchor, PageMark } from '@/types'
+import type { Annotation, AnnotationAnchor, PageMark, PdfNoteLink } from '@/types'
 
 export interface HistoryEntry<T> {
   undo: T
@@ -74,6 +75,18 @@ export type MarkHistoryCommand =
   | { type: 'put-mark'; mark: PageMark }
   | { type: 'remove-annotation'; id: string }
   | { type: 'restore-annotation'; annotation: Annotation; anchor: AnnotationAnchor }
+  | {
+      type: 'remove-pdf-note-link'
+      link: PdfNoteLink
+      annotation: Annotation
+      anchor: AnnotationAnchor
+    }
+  | {
+      type: 'restore-pdf-note-link'
+      link: PdfNoteLink
+      annotation: Annotation
+      anchor: AnnotationAnchor
+    }
 
 export const markHistory = new UndoStack<MarkHistoryCommand>()
 
@@ -93,6 +106,15 @@ export async function applyHistoryCommand(command: MarkHistoryCommand): Promise<
       return
     case 'restore-annotation':
       await annotationsRepo.restore(command.annotation, command.anchor)
+      return
+    case 'remove-pdf-note-link':
+      await pdfNoteLinksRepo.remove(command.link.id)
+      await AnnotationEngine.remove(command.annotation.id)
+      return
+    case 'restore-pdf-note-link':
+      await annotationsRepo.restore(command.annotation, command.anchor)
+      await pdfNoteLinksRepo.put(command.link)
+      return
   }
 }
 
@@ -159,5 +181,27 @@ export function recordAnnotationRemoved(annotation: Annotation, anchor: Annotati
   markHistory.push({
     undo: { type: 'restore-annotation', annotation, anchor },
     redo: { type: 'remove-annotation', id: annotation.id },
+  })
+}
+
+export function recordPdfNoteLinkCreated(
+  link: PdfNoteLink,
+  annotation: Annotation,
+  anchor: AnnotationAnchor,
+) {
+  markHistory.push({
+    undo: { type: 'remove-pdf-note-link', link, annotation, anchor },
+    redo: { type: 'restore-pdf-note-link', link, annotation, anchor },
+  })
+}
+
+export function recordPdfNoteLinkRemoved(
+  link: PdfNoteLink,
+  annotation: Annotation,
+  anchor: AnnotationAnchor,
+) {
+  markHistory.push({
+    undo: { type: 'restore-pdf-note-link', link, annotation, anchor },
+    redo: { type: 'remove-pdf-note-link', link, annotation, anchor },
   })
 }

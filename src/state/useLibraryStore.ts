@@ -21,6 +21,8 @@ interface LibraryState {
 
   hydrate: () => Promise<void>
   openNode: (nodeId: string) => Promise<void>
+  /** Highlight a library row without moving the PDF or swapping the note. */
+  highlightNode: (nodeId: string) => Promise<void>
   /** Always enter Study — used by Study-page blocks, including sciences. */
   openStudySession: (nodeId: string) => Promise<void>
   showLibrary: () => void
@@ -88,6 +90,14 @@ export const useLibraryStore = create<LibraryState>((set) => ({
     }
 
     await reopen(nodeId)
+    await libraryRepo.touch(nodeId)
+    set({ activeNodeId: nodeId })
+    void appStateRepo.set('activeLibraryNode', nodeId)
+  },
+
+  async highlightNode(nodeId) {
+    const node = await libraryRepo.get(nodeId)
+    if (!node) return
     await libraryRepo.touch(nodeId)
     set({ activeNodeId: nodeId })
     void appStateRepo.set('activeLibraryNode', nodeId)

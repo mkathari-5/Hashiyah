@@ -388,4 +388,18 @@ describe('saveNote', () => {
 
     expect((await notesRepo.get(note.id))?.title).toBe('Millat Ibrāhīm')
   })
+
+  it('keeps assigned block ids through save and reload', async () => {
+    const note = await notesRepo.create({ bookId: null, title: 'Untitled note' })
+    await saveNote(note.id, {
+      type: 'doc',
+      content: [heading(1, 'Explanation of Chapter Title', 'blk_stable')],
+    })
+    const reloaded = await db.noteDocs.get(note.id)
+    expect(JSON.stringify(reloaded?.doc)).toContain('blk_stable')
+    await saveNote(note.id, reloaded!.doc)
+    const again = await db.noteDocs.get(note.id)
+    expect(JSON.stringify(again?.doc)).toContain('blk_stable')
+    expect(JSON.stringify(again?.doc).match(/blk_stable/g)?.length).toBeGreaterThan(0)
+  })
 })

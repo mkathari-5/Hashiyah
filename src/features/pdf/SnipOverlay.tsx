@@ -29,18 +29,91 @@ interface Drag {
   current: { x: number; y: number }
 }
 
+function pageUnderPoint(x: number, y: number): HTMLElement | undefined {
+  return document
+    .elementsFromPoint(x, y)
+    .find((node) => node instanceof HTMLElement && node.dataset.page) as HTMLElement | undefined
+}
+
 export function SnipOverlay({ pdf, scrollRef }: Props) {
   const snipMode = useStudyStore((s) => s.snipMode)
   const setSnipMode = useStudyStore((s) => s.setSnipMode)
   const [drag, setDrag] = useState<Drag | null>(null)
   const [busy, setBusy] = useState(false)
   const dragRef = useRef<Drag | null>(null)
-  dragRef.current = drag
+  const busyRef = useRef(false)
+  busyRef.current = busy
 
   const cancel = useCallback(() => {
+    dragRef.current = null
     setDrag(null)
     setSnipMode(null)
   }, [setSnipMode])
+
+  const commitDrag = useCallback(async () => {
+    const current = dragRef.current
+    dragRef.current = null
+    setDrag(null)
+    if (!current || busyRef.current) return
+
+    const mode = useStudyStore.getState().snipMode
+    const rect = dragToNormalizedRect(current.start, current.current, current.pageBox)
+    if (!rect && mode !== 'link') {
+      cancel()
+      return
+    }
+
+    setBusy(true)
+    busyRef.current = true
+    try {
+      if (mode === 'link') {
+        const study = useStudyStore.getState()
+        if (!study.bookId || !study.documentId) {
+          cancel()
+          return
+        }
+        const nx = (current.start.x - current.pageBox.left) / current.pageBox.width
+        const ny = (current.start.y - current.pageBox.top) / current.pageBox.height
+        const kind = rect ? 'region' : 'point'
+        const rects = rect ? [rect] : [{ x: nx, y: ny, w: 0.004, h: 0.004 }]
+        study.setLinkDraft({
+          capture: {
+            pageNumber: current.pageNumber,
+            text: '',
+            startOffset: 0,
+            endOffset: 0,
+            itemStart: 0,
+            itemEnd: 0,
+            textBefore: '',
+            textAfter: '',
+            occurrenceIndex: 0,
+            rects,
+            pageWidth: current.pageBox.width,
+            pageHeight: current.pageBox.height,
+            pageRotation: 0,
+          },
+          documentId: study.documentId,
+          bookId: study.bookId,
+          menuLeft: current.current.x,
+          menuTop: current.current.y,
+          textSource: 'none',
+          anchorKind: kind,
+        })
+        return
+      }
+      if (!rect) {
+        cancel()
+        return
+      }
+      await captureRegionToNotes(pdf, current.pageNumber, rect, {
+        withExplanation: mode === 'explain',
+      })
+    } finally {
+      busyRef.current = false
+      setBusy(false)
+      setSnipMode(null)
+    }
+  }, [cancel, pdf, setSnipMode])
 
   useEffect(() => {
     if (!snipMode) return
@@ -50,55 +123,42 @@ export function SnipOverlay({ pdf, scrollRef }: Props) {
         cancel()
       }
     }
+    const onMove = (event: PointerEvent) => {
+      if (!dragRef.current) return
+      const next = { ...dragRef.current, current: { x: event.clientX, y: event.clientY } }
+      dragRef.current = next
+      setDrag(next)
+    }
+    const onUp = () => {
+      if (!dragRef.current) return
+      void commitDrag()
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [snipMode, cancel])
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [snipMode, cancel, commitDrag])
 
   if (!snipMode) return null
 
   const onPointerDown = (event: React.PointerEvent) => {
-    if (busy) return
-    // Find the page under the pointer by hit-testing, since the overlay itself
-    // sits above every page.
+    if (busyRef.current) return
     const container = scrollRef.current
     if (!container) return
-    const el = document
-      .elementsFromPoint(event.clientX, event.clientY)
-      .find((node) => node instanceof HTMLElement && node.dataset.page) as HTMLElement | undefined
+    const el = pageUnderPoint(event.clientX, event.clientY)
     if (!el) return
 
     const pageNumber = Number(el.dataset.page)
     const pageBox = el.getBoundingClientRect()
     const point = { x: event.clientX, y: event.clientY }
-    setDrag({ pageNumber, pageBox, start: point, current: point })
-    ;(event.target as HTMLElement).setPointerCapture?.(event.pointerId)
-  }
-
-  const onPointerMove = (event: React.PointerEvent) => {
-    if (!dragRef.current) return
-    setDrag({ ...dragRef.current, current: { x: event.clientX, y: event.clientY } })
-  }
-
-  const onPointerUp = async () => {
-    const current = dragRef.current
-    setDrag(null)
-    if (!current) return
-
-    const rect = dragToNormalizedRect(current.start, current.current, current.pageBox)
-    if (!rect) {
-      cancel()
-      return
-    }
-
-    setBusy(true)
-    try {
-      await captureRegionToNotes(pdf, current.pageNumber, rect, {
-        withExplanation: snipMode === 'explain',
-      })
-    } finally {
-      setBusy(false)
-      setSnipMode(null)
-    }
+    const next = { pageNumber, pageBox, start: point, current: point }
+    dragRef.current = next
+    setDrag(next)
+    event.preventDefault()
   }
 
   const box = drag
@@ -114,10 +174,8 @@ export function SnipOverlay({ pdf, scrollRef }: Props) {
     <div
       className="snip-overlay"
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
       role="application"
-      aria-label="Drag to capture a region of the page"
+      aria-label={snipMode === 'link' ? 'Drag to link a region of the page' : 'Drag to capture a region of the page'}
     >
       {box && (
         <div
@@ -131,7 +189,7 @@ export function SnipOverlay({ pdf, scrollRef }: Props) {
           'Capturing…'
         ) : (
           <>
-            Drag to capture{snipMode === 'explain' ? ' and explain' : ''}
+            Drag to {snipMode === 'link' ? 'link a region' : `capture${snipMode === 'explain' ? ' and explain' : ''}`}
             <span className="snip-hint-key">Esc</span>
           </>
         )}

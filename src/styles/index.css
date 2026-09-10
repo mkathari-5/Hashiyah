@@ -3259,6 +3259,271 @@ svg.block-menu-icon {
   }
 }
 
+.pdf-note-link-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+.pdf-note-link-connector {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--color-hl-green) 70%, var(--color-line));
+}
+
+.pdf-note-link-connector line {
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.pdf-note-link-label {
+  pointer-events: auto;
+  position: absolute;
+  z-index: 7;
+  display: inline-flex;
+  max-width: 14rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.4rem 0.15rem 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--color-hl-green) 45%, var(--color-line));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-hl-green) 12%, var(--color-elevated));
+  color: var(--color-ink);
+  font-size: 11px;
+  line-height: 1.25;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  cursor: pointer;
+  user-select: none;
+}
+
+.pdf-note-link-label:hover,
+.pdf-note-link-label:focus-visible {
+  outline: none;
+  border-color: var(--color-hl-green);
+  background: color-mix(in srgb, var(--color-hl-green) 18%, var(--color-elevated));
+}
+
+.pdf-note-link-label.is-selected,
+.pdf-note-link-label:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-hl-green) 45%, transparent);
+}
+
+.pdf-note-link-label.is-missing {
+  border-color: color-mix(in srgb, var(--color-hl-rose) 50%, var(--color-line));
+  background: color-mix(in srgb, var(--color-hl-rose) 10%, var(--color-elevated));
+}
+
+.pdf-note-link-label.is-pulse {
+  animation: block-pulse 1.2s ease-in-out 1;
+}
+
+.pdf-note-link-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-note-link-edit {
+  width: 9rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.pdf-note-link-preview {
+  pointer-events: none;
+  position: absolute;
+  z-index: 8;
+  max-width: 16rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-elevated);
+  box-shadow: var(--shadow-lg, 0 8px 24px color-mix(in srgb, var(--color-ink) 12%, transparent));
+  font-size: 11px;
+}
+
+.pdf-note-link-preview-title {
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.pdf-note-link-preview-body {
+  color: var(--color-ink-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.pdf-note-link-source.hl-pulse {
+  background: color-mix(in srgb, var(--color-hl-green) 28%, transparent);
+}
+
+.note-target-picker {
+  position: fixed;
+  z-index: 60;
+  width: min(22rem, calc(100vw - 1rem));
+  max-height: min(28rem, calc(100vh - 1.5rem));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-elevated);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--color-ink) 16%, transparent);
+}
+
+.note-target-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.7rem 0.35rem;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.note-target-picker-search {
+  margin: 0 0.55rem 0.4rem;
+  height: 1.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-panel);
+  padding: 0 0.5rem;
+  color: var(--color-ink);
+  font-size: 12px;
+}
+
+.note-target-picker-list {
+  margin: 0;
+  padding: 0 0.35rem 0.35rem;
+  list-style: none;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.note-target-picker-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  border-radius: 4px;
+  text-align: start;
+}
+
+.note-target-picker-item.is-active,
+.note-target-picker-item:hover {
+  background: var(--color-hover);
+}
+
+.note-target-picker-kind {
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+.note-target-picker-title {
+  font-size: 12.5px;
+}
+
+.note-target-picker-crumb {
+  font-size: 10.5px;
+  color: var(--color-ink-muted);
+}
+
+.note-target-picker-empty {
+  padding: 0.8rem 0.6rem;
+  font-size: 12px;
+  color: var(--color-ink-faint);
+}
+
+.note-target-picker-create,
+.note-target-picker-actions {
+  border-top: 1px solid var(--color-line);
+  padding: 0.4rem 0.55rem;
+}
+
+.note-target-picker-create {
+  width: 100%;
+  text-align: start;
+  font-size: 12px;
+  color: var(--color-accent);
+}
+
+.note-target-picker-parent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0 0.55rem 0.4rem;
+  font-size: 11px;
+  color: var(--color-ink-muted);
+}
+
+.note-target-picker-parent select {
+  height: 1.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-panel);
+  color: var(--color-ink);
+}
+
+.note-target-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.note-source-chips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.note-source-chip-stack {
+  position: absolute;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  transform: translateY(-1.35rem);
+  pointer-events: auto;
+}
+
+.note-source-chip {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--color-hl-green) 40%, var(--color-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-hl-green) 10%, var(--color-elevated));
+  color: var(--color-ink-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.note-source-chip:hover,
+.note-source-chip:focus-visible {
+  color: var(--color-ink);
+  border-color: var(--color-hl-green);
+}
+
+.note-source-chip.is-missing {
+  border-color: color-mix(in srgb, var(--color-hl-rose) 50%, var(--color-line));
+}
+
 .node-menu {
   position: fixed;
   z-index: 50;

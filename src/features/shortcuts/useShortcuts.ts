@@ -103,7 +103,7 @@ export function useShortcuts() {
           study.setEditingMarkId(study.selectedMarkId)
           return
         }
-        if ((event.key === 'Delete' || event.key === 'Backspace') && (study.selectedMarkId || study.activeAnnotationId)) {
+        if ((event.key === 'Delete' || event.key === 'Backspace') && (study.selectedMarkId || study.activeAnnotationId || study.selectedPdfNoteLinkId)) {
           event.preventDefault()
           void deleteSelectedAnnotation()
           return

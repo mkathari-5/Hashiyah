@@ -3,7 +3,7 @@ import { libraryBlocksRepo } from '@/db/repos/libraryPages'
 import { libraryRepo } from '@/db/repos/libraryTree'
 import { useLibraryStore } from '@/state/useLibraryStore'
 import { useStudyStore } from '@/state/useStudyStore'
-import type { LibraryBlock, LibraryNode, Note, NoteDoc, NoteLink, QuoteRef } from '@/types'
+import type { Annotation, AnnotationAnchor, LibraryBlock, LibraryNode, Note, NoteDoc, NoteLink, PdfNoteLink, QuoteRef } from '@/types'
 
 export interface DeleteImpact {
   id: string
@@ -24,6 +24,9 @@ export interface NodeDeleteSnapshot {
   docs: NoteDoc[]
   quoteRefs: QuoteRef[]
   noteLinks: NoteLink[]
+  pdfNoteLinks: PdfNoteLink[]
+  linkAnnotations: Annotation[]
+  linkAnchors: AnnotationAnchor[]
   selectAfter: string | null
 }
 
@@ -63,7 +66,7 @@ function deletionDetail(flags: { hasNotes: boolean; hasPdf: boolean; hasCaptures
   const bits: string[] = []
   if (flags.hasNotes) bits.push('Their notes will be deleted.')
   if (flags.hasPdf) bits.push('The PDF itself is kept.')
-  if (flags.hasCaptures) bits.push('Source excerpts stored in those notes will be removed with them.')
+  if (flags.hasCaptures) bits.push('Source excerpts and PDF linked labels stored with those notes will be removed with them.')
   if (flags.nestedCount > 0 && bits.length === 0) bits.push('Nested items will be removed.')
   return bits.join(' ')
 }
@@ -78,10 +81,12 @@ export async function inspectNodeDeletion(id: string): Promise<DeleteImpact | nu
     await Promise.all(noteIds.map((noteId) => db.noteDocs.get(noteId)))
   ).filter((row): row is NoteDoc => !!row)
   const quoteCounts = await Promise.all(noteIds.map((noteId) => db.quoteRefs.where('noteId').equals(noteId).count()))
+  const linkCounts = await Promise.all(noteIds.map((noteId) => db.pdfNoteLinks.where('noteDocumentId').equals(noteId).count()))
   const hasNotes = docs.some((doc) => tiptapDocHasSubstance(doc.doc))
   const hasPdf = all.some((row) => !!row.bookId)
   const hasCaptures =
     quoteCounts.some((count) => count > 0) ||
+    linkCounts.some((count) => count > 0) ||
     docs.some((doc) => typeof doc.doc === 'object' && doc.doc && JSON.stringify(doc.doc).includes('sourceQuote'))
   const nestedCount = descendants.length
   const hasContent = hasNotes || hasPdf || hasCaptures || nestedCount > 0 || !!node.title.trim() || !!node.arabicTitle?.trim()
@@ -149,24 +154,41 @@ export async function snapshotNodeDeletion(id: string): Promise<NodeDeleteSnapsh
   ).filter((row): row is NoteDoc => !!row)
   const quoteRefs: QuoteRef[] = []
   const noteLinks: NoteLink[] = []
+  const pdfNoteLinks: PdfNoteLink[] = []
   for (const noteId of noteIds) {
     quoteRefs.push(...(await db.quoteRefs.where('noteId').equals(noteId).toArray()))
     noteLinks.push(...(await db.noteLinks.where('sourceNoteId').equals(noteId).toArray()))
+    pdfNoteLinks.push(...(await db.pdfNoteLinks.where('noteDocumentId').equals(noteId).toArray()))
+  }
+  const linkAnnotations: Annotation[] = []
+  const linkAnchors: AnnotationAnchor[] = []
+  for (const link of pdfNoteLinks) {
+    const annotation = await db.annotations.get(link.annotationId)
+    const anchor = await db.anchors.where('annotationId').equals(link.annotationId).first()
+    if (annotation) linkAnnotations.push(annotation)
+    if (anchor) linkAnchors.push(anchor)
   }
   const siblings = await libraryRepo.children(node.parentId)
   const index = siblings.findIndex((row) => row.id === id)
   const selectAfter = siblings[index + 1]?.id ?? siblings[index - 1]?.id ?? node.parentId
-  return { nodes, notes, docs, quoteRefs, noteLinks, selectAfter }
+  return { nodes, notes, docs, quoteRefs, noteLinks, pdfNoteLinks, linkAnnotations, linkAnchors, selectAfter }
 }
 
 export async function restoreNodeDeletion(snapshot: NodeDeleteSnapshot): Promise<void> {
-  await db.transaction('rw', db.libraryNodes, db.notes, db.noteDocs, db.quoteRefs, db.noteLinks, async () => {
-    await db.libraryNodes.bulkPut(snapshot.nodes)
-    if (snapshot.notes.length) await db.notes.bulkPut(snapshot.notes)
-    if (snapshot.docs.length) await db.noteDocs.bulkPut(snapshot.docs)
-    if (snapshot.quoteRefs.length) await db.quoteRefs.bulkPut(snapshot.quoteRefs)
-    if (snapshot.noteLinks.length) await db.noteLinks.bulkPut(snapshot.noteLinks)
-  })
+  await db.transaction(
+    'rw',
+    [db.libraryNodes, db.notes, db.noteDocs, db.quoteRefs, db.noteLinks, db.pdfNoteLinks, db.annotations, db.anchors],
+    async () => {
+      await db.libraryNodes.bulkPut(snapshot.nodes)
+      if (snapshot.notes.length) await db.notes.bulkPut(snapshot.notes)
+      if (snapshot.docs.length) await db.noteDocs.bulkPut(snapshot.docs)
+      if (snapshot.quoteRefs.length) await db.quoteRefs.bulkPut(snapshot.quoteRefs)
+      if (snapshot.noteLinks.length) await db.noteLinks.bulkPut(snapshot.noteLinks)
+      if (snapshot.linkAnnotations.length) await db.annotations.bulkPut(snapshot.linkAnnotations)
+      if (snapshot.linkAnchors.length) await db.anchors.bulkPut(snapshot.linkAnchors)
+      if (snapshot.pdfNoteLinks.length) await db.pdfNoteLinks.bulkPut(snapshot.pdfNoteLinks)
+    },
+  )
 }
 
 function isOrganiser(type: LibraryNode['type']): boolean {

@@ -5,8 +5,10 @@ import { anchorsRepo } from '@/db/repos/annotations'
 import { pageMarksRepo } from '@/db/repos/pageMarks'
 import { AnnotationToolbar } from '@/features/pdf/AnnotationToolbar'
 import { PageMarkLayer } from '@/features/pdf/PageMarkLayer'
+import { PdfNoteLinkLayer } from '@/features/pdf/PdfNoteLinkLayer'
 import { PdfPage, type PageContextRegistry } from '@/features/pdf/PdfPage'
 import { SelectionMenu } from '@/features/pdf/SelectionMenu'
+import { NoteTargetPicker } from '@/features/pdf/NoteTargetPicker'
 import { SnipOverlay } from '@/features/pdf/SnipOverlay'
 import { usePdfDocument } from '@/features/pdf/usePdfDocument'
 import { isTypingContext } from '@/features/shortcuts/typingContext'
@@ -307,7 +309,11 @@ export function PdfViewer() {
     if (!target.closest('.page-mark, .mark-style-bar')) {
       const study = useStudyStore.getState()
       if (study.pdfTool === 'select' || study.pdfTool === 'erase') {
-        if (target.closest('.pdf-page-slot') && !target.closest('.pdf-page')) {
+        if (
+          target.closest('.pdf-page-slot') &&
+          !target.closest('.pdf-page') &&
+          !target.closest('.pdf-note-link-label')
+        ) {
           study.setSelectedMarkId(null)
           study.setEditingMarkId(null)
         }
@@ -364,65 +370,76 @@ export function PdfViewer() {
         onCancelOcr={() => schedulerRef.current?.cancel()}
       />
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        onKeyDown={onKeyDown}
-        tabIndex={0}
-        className={`pdf-canvas relative flex-1 overflow-auto outline-none${panActive ? ' is-panning' : ''}`}
-        onPointerDown={onCanvasPointerDown}
-        onPointerMove={onCanvasPointerMove}
-        onPointerUp={onCanvasPointerUp}
-      >
-        <div style={{ height: pageCount * slot + GAP, width: workspaceWidth, position: 'relative' }}>
-          {visiblePages.map((n) => (
-            <div
-              key={n}
-              className="pdf-page-slot"
-              style={{
-                position: 'absolute',
-                top: (n - 1) * slot + GAP,
-                left: 0,
-                width: workspaceWidth,
-                height: pageHeight,
-              }}
-            >
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          onKeyDown={onKeyDown}
+          tabIndex={0}
+          className={`pdf-canvas relative h-full overflow-auto outline-none${panActive ? ' is-panning' : ''}`}
+          onPointerDown={onCanvasPointerDown}
+          onPointerMove={onCanvasPointerMove}
+          onPointerUp={onCanvasPointerUp}
+        >
+          <div style={{ height: pageCount * slot + GAP, width: workspaceWidth, position: 'relative' }}>
+            {visiblePages.map((n) => (
               <div
-                className="pdf-page-stage"
-                style={{ position: 'absolute', left: pageLeft, top: 0, width: pageWidth, height: pageHeight }}
+                key={n}
+                className="pdf-page-slot"
+                style={{
+                  position: 'absolute',
+                  top: (n - 1) * slot + GAP,
+                  left: 0,
+                  width: workspaceWidth,
+                  height: pageHeight,
+                }}
               >
-                <PdfPage
-                  pdf={handle.pdf}
+                <div
+                  className="pdf-page-stage"
+                  style={{ position: 'absolute', left: pageLeft, top: 0, width: pageWidth, height: pageHeight }}
+                >
+                  <PdfPage
+                    pdf={handle.pdf}
+                    documentId={documentId!}
+                    bookId={bookId}
+                    pageNumber={n}
+                    width={pageWidth}
+                    aspect={rotatedAspect}
+                    visible
+                    registry={registry}
+                    rotation={pageRotation as PageRotation}
+                    pdfPageWidth={handle.baseWidth}
+                    pdfPageHeight={handle.baseHeight}
+                  />
+                </div>
+                <PageMarkLayer
                   documentId={documentId!}
                   bookId={bookId}
                   pageNumber={n}
-                  width={pageWidth}
-                  aspect={rotatedAspect}
-                  visible
-                  registry={registry}
+                  pageWidth={pageWidth}
+                  pageHeight={pageHeight}
+                  pageLeft={pageLeft}
                   rotation={pageRotation as PageRotation}
                   pdfPageWidth={handle.baseWidth}
                   pdfPageHeight={handle.baseHeight}
                 />
+                <PdfNoteLinkLayer
+                  documentId={documentId!}
+                  pageNumber={n}
+                  pageWidth={pageWidth}
+                  pageHeight={pageHeight}
+                  pageLeft={pageLeft}
+                  rotation={pageRotation as PageRotation}
+                />
               </div>
-              <PageMarkLayer
-                documentId={documentId!}
-                bookId={bookId}
-                pageNumber={n}
-                pageWidth={pageWidth}
-                pageHeight={pageHeight}
-                pageLeft={pageLeft}
-                rotation={pageRotation as PageRotation}
-                pdfPageWidth={handle.baseWidth}
-                pdfPageHeight={handle.baseHeight}
-              />
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
+        <SnipOverlay pdf={handle.pdf} scrollRef={scrollRef} />
       </div>
 
       <SelectionMenu />
-      <SnipOverlay pdf={handle.pdf} scrollRef={scrollRef} />
+      <NoteTargetPicker />
     </div>
   )
 }
@@ -438,7 +455,7 @@ interface ToolbarProps {
   onPage: (page: number) => void
   onZoom: (zoom: number) => void
   onFitWidth: () => void
-  onSnip: (mode: 'capture' | 'explain') => void
+  onSnip: (mode: 'capture' | 'explain' | 'link') => void
   snipActive: boolean
 }
 
@@ -547,6 +564,15 @@ function Toolbar({
           className="ui-btn ui-btn-icon"
         >
           <Icon name="snip-explain" />
+        </button>
+        <button
+          onClick={() => onSnip('link')}
+          title="Link a region to a note section"
+          aria-label="Link a region to a note section"
+          aria-pressed={snipActive}
+          className="ui-btn ui-btn-icon"
+        >
+          <Icon name="link" />
         </button>
       </div>
     </div>
